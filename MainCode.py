@@ -28,55 +28,79 @@ videos = [
     ("--5OkAjCI7g", 40, "people_belly_laughing")
 ]
 
-for video_id, start_sec, label in videos:
-    full_file = os.path.join(full_videos_path, f"{video_id}_full.mp4")
-    clip_file = os.path.join(trimmed_videos_path, f"{video_id}.mp4")
+def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10):
+    """
+    Downloads and trims videos from YouTube.
 
-    download_status = "failed"
-    trim_status = "unknown"
+    Args:
+        videos (list): List of tuples (video_id, start_sec, label)
+        full_videos_path (str): Path to save full videos
+        trimmed_videos_path (str): Path to save trimmed clips
+        log_file (str): Path to CSV file to log failures
+        clip_length (int): Length of trimmed clips in seconds (default 10)
+    """
+    os.makedirs(full_videos_path, exist_ok=True)
+    os.makedirs(trimmed_videos_path, exist_ok=True)
 
-    # Download full video if not already present
-    if not os.path.exists(full_file):
-        print(f"Downloading full video {video_id}...")
-        ydl_opts = {'format': 'mp4', 'outtmpl': full_file}
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-            print(f"Downloaded full video {video_id} successfully.")
-            download_status = "success"
-        except Exception as e:
-            print(f"Failed to download {video_id}: {e}")
-    else:
-        print(f"Full video {video_id} already exists. Skipping download.")
-        download_status = "success"
-
-    # Trim 10-second clip using ffmpeg if not already present
-    if download_status == "success":
-        if not os.path.exists(clip_file):
-            print(f"Trimming {video_id} to 10 seconds...")
-            try:
-                subprocess.run([
-                    "ffmpeg",
-                    "-y",  # overwrite if exists
-                    "-ss", str(start_sec),
-                    "-i", full_file,
-                    "-t", "10",
-                    "-c", "copy",
-                    clip_file
-                ], check=True)
-                print(f"Trimmed {video_id} successfully.")
-                trim_status = "success"
-            except subprocess.CalledProcessError as e:
-                print(f"Failed to trim {video_id}: {e}")
-                trim_status = "failed"
-        else:
-            print(f"Trimmed clip {video_id} already exists. Skipping trimming.")
-            trim_status = "success"
-
-    # Log the failures TODO: make a fucntion which prevents duplicate entries
-    with open(log_file, mode='a', newline='', encoding='utf-8') as f:
-        if download_status == "failed" or trim_status in ("failed", "unknown"):    
+    # Create log file with headers if it doesn't exist
+    if not os.path.exists(log_file):
+        with open(log_file, mode='w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow([video_id, download_status, trim_status])
+            writer.writerow(["video_id", "download", "trim"])
+
+    for video_id, start_sec, label in videos:
+        full_file = os.path.join(full_videos_path, f"{video_id}_full.mp4")
+        clip_file = os.path.join(trimmed_videos_path, f"{video_id}.mp4")
+
+        download_status = "failed"
+        trim_status = "unknown"
+
+        # Download full video
+        if not os.path.exists(full_file):
+            print(f"Downloading full video {video_id}...")
+            ydl_opts = {'format': 'mp4', 'outtmpl': full_file}
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+                print(f"Downloaded full video {video_id} successfully.")
+                download_status = "success"
+            except Exception as e:
+                print(f"Failed to download {video_id}: {e}")
+        else:
+            print(f"Full video {video_id} already exists. Skipping download.")
+            download_status = "success"
+
+        # Trim video
+        if download_status == "success":
+            if not os.path.exists(clip_file):
+                print(f"Trimming {video_id} to {clip_length} seconds...")
+                try:
+                    subprocess.run([
+                        "ffmpeg",
+                        "-y",  # overwrite if exists
+                        "-ss", str(start_sec),
+                        "-i", full_file,
+                        "-t", str(clip_length),
+                        "-c", "copy",
+                        clip_file
+                    ], check=True)
+                    print(f"Trimmed {video_id} successfully.")
+                    trim_status = "success"
+                except subprocess.CalledProcessError as e:
+                    print(f"Failed to trim {video_id}: {e}")
+                    trim_status = "failed"
+            else:
+                print(f"Trimmed clip {video_id} already exists. Skipping trimming.")
+                trim_status = "success"
+
+        # Log failures TODO: write a fucntion to prevent the faulty video being logged multiple times
+        if download_status == "failed" or trim_status in ("failed", "unknown"):
+            with open(log_file, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([video_id, download_status, trim_status])
+
+
+download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10)
+
 
 
