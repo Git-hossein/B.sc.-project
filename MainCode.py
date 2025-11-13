@@ -13,12 +13,12 @@ video_frames_path = os.path.join(base_path, "frames")
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 
-# Log file path
-log_file = ("./Logs_download_trim.csv")
+# Log files path
+download_and_trim_log_file = ("./Logs_download_trim.csv")
 
 # Create log file with headers if it doesn't exist
-if not os.path.exists(log_file):
-    with open(log_file, mode='w', newline='', encoding='utf-8') as f:
+if not os.path.exists(download_and_trim_log_file):
+    with open(download_and_trim_log_file, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(["video_id", "download", "trim"])
 
@@ -145,4 +145,4 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
             print(f"⚠️ Failed to extract frames for {video_id}: {e}")
 
 
-extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
+# extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
