@@ -9,6 +9,7 @@ base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
 # Create separate folders for full and trimmed clips
 full_videos_path = os.path.join(base_path, "full_videos")
 trimmed_videos_path = os.path.join(base_path, "trimmed_videos")
+video_frames_path = os.path.join(base_path, "frames")
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 
@@ -100,7 +101,48 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
                 writer.writerow([video_id, download_status, trim_status])
 
 
-download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10)
+# download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10)
+
+def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
+    """
+    Extract frames from all trimmed .mp4 videos in `trimmed_videos_dir` and save them 
+    into subfolders in `frames_dir`, one subfolder per video.
+
+    Args:
+        trimmed_videos_dir (str): Path to the folder containing trimmed .mp4 videos.
+        frames_dir (str): Path to save extracted frames.
+        fps (int): Number of frames per second to extract (default: 5).
+    """
+    os.makedirs(frames_dir, exist_ok=True)
+
+    # Only consider trimmed videos
+    videos = [f for f in os.listdir(trimmed_videos_dir) if f.endswith(".mp4")]
+    print(f"Found {len(videos)} trimmed videos for frame extraction.")
+
+    for video in videos:
+        video_path = os.path.join(trimmed_videos_dir, video)
+        video_id = os.path.splitext(video)[0]
+        output_folder = os.path.join(frames_dir, video_id)
+        os.makedirs(output_folder, exist_ok=True)
+
+        # Output pattern for frames
+        output_pattern = os.path.join(output_folder, "frame_%04d.jpg")
+
+        # ffmpeg command
+        cmd = [
+            r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe",
+            "-i", video_path,
+            "-vf", f"fps={fps}",
+            output_pattern,
+            "-hide_banner",
+            "-loglevel", "error"  # suppress ffmpeg spam
+        ]
+
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"✅ Extracted frames for {video_id} successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Failed to extract frames for {video_id}: {e}")
 
 
-
+extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
