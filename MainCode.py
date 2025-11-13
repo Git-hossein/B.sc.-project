@@ -10,17 +10,25 @@ base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
 full_videos_path = os.path.join(base_path, "full_videos")
 trimmed_videos_path = os.path.join(base_path, "trimmed_videos")
 video_frames_path = os.path.join(base_path, "frames")
+audios_path = os.path.join(base_path, "audios")
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
+os.makedirs(audios_path, exist_ok=True)
 
 # Log files path
 download_and_trim_log_file = ("./Logs_download_trim.csv")
+extract_audio_log_file     = ("./Logs_extract_audio.csv")
 
 # Create log file with headers if it doesn't exist
 if not os.path.exists(download_and_trim_log_file):
     with open(download_and_trim_log_file, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(["video_id", "download", "trim"])
+
+if not os.path.exists(extract_audio_log_file):
+    with open(extract_audio_log_file, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(["video_id", "extract_audio_status"])
 
 # List of example videos with start time and labels
 videos = [
@@ -152,3 +160,50 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
 
 
 # extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
+
+def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000, log_file=extract_audio_log_file):
+    """
+    Extracts audio from trimmed videos as .wav files (mono, resampled to sample_rate)
+    and logs failures.
+
+    Args:
+        trimmed_videos_dir (str): Path to folder with trimmed .mp4 videos.
+        audios_dir (str): Path to save extracted audio files.
+        sample_rate (int): Target sample rate for audio (default 16 kHz for Wav2CLIP).
+        log_file (str): CSV file to log failures.
+    """
+    
+    videos = [f for f in os.listdir(trimmed_videos_dir) if f.endswith(".mp4")]
+    print(f"Found {len(videos)} trimmed videos for audio extraction.")
+    
+    for video in videos:
+        video_path = os.path.join(trimmed_videos_dir, video)
+        video_id = os.path.splitext(video)[0]
+        audio_file = os.path.join(audios_dir, f"{video_id}.wav")
+        
+        if os.path.exists(audio_file):
+            print(f"Audio for {video_id} already exists. Skipping.")
+            continue
+        
+        cmd = [
+            r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe",
+            "-y",  # overwrite if exists
+            "-i", video_path,
+            "-ac", "1",  # mono
+            "-ar", str(sample_rate),  # resample
+            audio_file,
+            "-hide_banner",
+            "-loglevel", "error"
+        ]
+        
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"Extracted audio for {video_id} successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Failed to extract audio for {video_id}: {e}")
+            # Log failure
+            with open(log_file, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([video_id, "failed"])
+
+# extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
