@@ -101,7 +101,7 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
                 writer.writerow([video_id, download_status, trim_status])
 
 
-# download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10)
+# download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
 
 def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
     """
@@ -124,6 +124,12 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
         video_id = os.path.splitext(video)[0]
         output_folder = os.path.join(frames_dir, video_id)
         os.makedirs(output_folder, exist_ok=True)
+
+       # Check if frames already exist
+        existing_frames = [f for f in os.listdir(output_folder) if f.startswith("frame_") and f.endswith(".jpg")]
+        if existing_frames:
+            print(f"⏭ Frames appear to already exist for {video_id}, skipping...")
+            continue
 
         # Output pattern for frames
         output_pattern = os.path.join(output_folder, "frame_%04d.jpg")
