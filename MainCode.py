@@ -147,7 +147,7 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
                 writer.writerow([video_id, download_status, trim_status])
 
 
-download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
+# download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
 
 def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
     """
@@ -197,7 +197,7 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
             print(f"⚠️ Failed to extract frames for {video_id}: {e}")
 
 
-extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
+# extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
 
 def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000, log_file=extract_audio_log_file):
     """
@@ -244,7 +244,7 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
+# extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
 
 
 
@@ -299,7 +299,7 @@ def extract_audio_embeddings(audios_dir, embeddings_dir, log_file="./Logs_audio_
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-extract_audio_embeddings(audios_path, audio_embeddings_path)
+# extract_audio_embeddings(audios_path, audio_embeddings_path)
 
 
 def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_embeddings_log_file,
@@ -363,4 +363,55 @@ def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_em
                 writer = csv.writer(f)
                 writer.writerow([vid, "failed_processing"])
 
-extract_video_embeddings(video_frames_path, video_embeddings_path, video_embeddings_log_file)
+# extract_video_embeddings(video_frames_path, video_embeddings_path, video_embeddings_log_file)
+
+
+
+# =============                     The RAG section                             ====================
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """
+    Compute cosine similarity between two 1D numpy arrays.
+    """
+    a_norm = a / np.linalg.norm(a)
+    b_norm = b / np.linalg.norm(b)
+    return float(np.dot(a_norm, b_norm))
+
+def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
+    """
+    Find the top-k most similar embeddings in a directory to the query embedding.
+
+    Args:
+        query_emb (np.ndarray): Query embedding (1D array).
+        embeddings_dir (str): Path to folder containing .npy embeddings.
+        k (int): Number of top results to return.
+
+    Returns:
+        List of tuples: [(filename, similarity_score), ...] sorted by similarity descending.
+    """
+    similarities = []
+
+    for file in os.listdir(embeddings_dir):
+        if not file.endswith(".npy"):
+            continue
+
+        emb_path = os.path.join(embeddings_dir, file)
+        emb = np.load(emb_path)
+        # Ensure it's a 1D vector
+        if emb.ndim > 1:
+            emb = emb.squeeze()
+        sim = cosine_similarity(query_emb, emb)
+        similarities.append((file, sim))
+
+    # Sort by similarity descending
+    similarities.sort(key=lambda x: x[1], reverse=True)
+
+    # Return top-k
+    return similarities[:k]
+
+
+# Example usage:
+query_embedding = np.load(os.path.join(video_embeddings_path, "--PlJNEnf-s.npy")) # bee, wasp, etc. buzzing
+top_similar = find_top_k_similar(query_embedding, audio_embeddings_path, k=5)
+for fname, score in top_similar:
+    print(fname, score)
