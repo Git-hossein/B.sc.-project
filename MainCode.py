@@ -2,6 +2,9 @@ import os
 import csv
 import yt_dlp
 import subprocess
+import numpy as np
+import soundfile as sf
+import wav2clip
 
 # Base dataset path
 base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
@@ -11,13 +14,16 @@ full_videos_path = os.path.join(base_path, "full_videos")
 trimmed_videos_path = os.path.join(base_path, "trimmed_videos")
 video_frames_path = os.path.join(base_path, "frames")
 audios_path = os.path.join(base_path, "audios")
+audio_embeddings_path = os.path.join(base_path, "audio_embeddings")
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 os.makedirs(audios_path, exist_ok=True)
+os.makedirs(audio_embeddings_path, exist_ok=True)
 
 # Log files path
 download_and_trim_log_file = ("./Logs_download_trim.csv")
 extract_audio_log_file     = ("./Logs_extract_audio.csv")
+embeddings_audio_log_file   = ("./Logs_audio_embeddings.csv")
 
 # Create log file with headers if it doesn't exist
 if not os.path.exists(download_and_trim_log_file):
@@ -29,6 +35,11 @@ if not os.path.exists(extract_audio_log_file):
     with open(extract_audio_log_file, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(["video_id", "extract_audio_status"])
+
+if not os.path.exists(embeddings_audio_log_file):
+    with open(embeddings_audio_log_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["video_id", "audio_embedding_status"])
 
 # List of example videos with start time and labels
 videos = [
@@ -207,3 +218,58 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
                 writer.writerow([video_id, "failed"])
 
 # extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
+
+
+
+# ============= The embeddings woll now be computed for audio as well as video ====================
+
+
+# Load Wav2CLIP model once (clip-level)
+wav2clip_model = wav2clip.get_model()
+
+def extract_audio_embeddings(audios_dir, embeddings_dir, log_file="./Logs_audio_embeddings.csv"):
+    """
+    Extracts clip-level Wav2CLIP embeddings for each .wav audio file.
+    Saves each embedding as a .npy file: <video_id>.npy
+    Logs failures in a CSV.
+    """
+
+    audio_files = [f for f in os.listdir(audios_dir) if f.endswith(".wav")]
+    print(f"Found {len(audio_files)} audio files for embedding.")
+
+    for audio_file in audio_files:
+        video_id = os.path.splitext(audio_file)[0]
+        audio_path = os.path.join(audios_dir, audio_file)
+        embedding_path = os.path.join(embeddings_dir, f"{video_id}.npy")
+
+        # Skip existing
+        if os.path.exists(embedding_path):
+            print(f"Embedding for {video_id} already exists. Skipping.")
+            continue
+
+        try:
+            # Load waveform (Wav2CLIP expects raw PCM float32)
+            audio_waveform, sr = sf.read(audio_path)
+
+            # If stereo → convert to mono by averaging channels
+            if len(audio_waveform.shape) == 2:
+                audio_waveform = audio_waveform.mean(axis=1)
+
+            # Ensure float32
+            audio_waveform = audio_waveform.astype(np.float32)
+
+            # Compute embedding
+            embedding = wav2clip.embed_audio(audio_waveform, wav2clip_model)
+
+            # Save
+            np.save(embedding_path, embedding)
+
+            print(f"✔ Embedded audio for {video_id}")
+
+        except Exception as e:
+            print(f"⚠️ Failed embedding for {video_id}: {e}")
+            with open(log_file, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([video_id, "failed"])
+
+extract_audio_embeddings(audios_path, audio_embeddings_path)
