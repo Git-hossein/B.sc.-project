@@ -5,6 +5,10 @@ import subprocess
 import numpy as np
 import soundfile as sf
 import wav2clip
+from PIL import Image
+import torch
+import clip
+import csv
 
 # Base dataset path
 base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
@@ -15,15 +19,18 @@ trimmed_videos_path = os.path.join(base_path, "trimmed_videos")
 video_frames_path = os.path.join(base_path, "frames")
 audios_path = os.path.join(base_path, "audios")
 audio_embeddings_path = os.path.join(base_path, "audio_embeddings")
+video_embeddings_path = os.path.join(base_path, "video_embeddings")
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 os.makedirs(audios_path, exist_ok=True)
 os.makedirs(audio_embeddings_path, exist_ok=True)
+os.makedirs(video_embeddings_path, exist_ok=True)
 
 # Log files path
 download_and_trim_log_file = ("./Logs_download_trim.csv")
 extract_audio_log_file     = ("./Logs_extract_audio.csv")
-embeddings_audio_log_file   = ("./Logs_audio_embeddings.csv")
+embeddings_audio_log_file  = ("./Logs_audio_embeddings.csv")
+video_embeddings_log_file  = ("./Logs_video_embeddings.csv")
 
 # Create log file with headers if it doesn't exist
 if not os.path.exists(download_and_trim_log_file):
@@ -40,6 +47,11 @@ if not os.path.exists(embeddings_audio_log_file):
     with open(embeddings_audio_log_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["video_id", "audio_embedding_status"])
+
+if not os.path.exists(video_embeddings_log_file):
+    with open(video_embeddings_log_file, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(["video_id", "embed_status"])
 
 # List of example videos with start time and labels
 videos = [
@@ -272,4 +284,62 @@ def extract_audio_embeddings(audios_dir, embeddings_dir, log_file="./Logs_audio_
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-extract_audio_embeddings(audios_path, audio_embeddings_path)
+# extract_audio_embeddings(audios_path, audio_embeddings_path)
+
+
+def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_embeddings_log_file,
+                             device="cuda" if torch.cuda.is_available() else "cpu"):
+    """
+    Extracts video embeddings by averaging CLIP embeddings of frames.
+    Logs any failures to a CSV.
+
+    Args:
+        frames_dir (str): Path containing subfolders for each video with frames (*.jpg).
+        video_embeddings_dir (str): Path to save one .npy file per video.
+        video_embeddings_log_file (str): Path to CSV log file.
+        device (str): 'cuda' or 'cpu'.
+    """
+
+    # Load CLIP model
+    model, preprocess = clip.load("ViT-B/32", device=device)
+
+    # List all videos (subfolders)
+    video_ids = [v for v in os.listdir(frames_dir) if os.path.isdir(os.path.join(frames_dir, v))]
+    print(f"Found {len(video_ids)} videos for embedding extraction.")
+
+    for vid in video_ids:
+        frame_folder = os.path.join(frames_dir, vid)
+        frame_files = sorted([f for f in os.listdir(frame_folder) if f.endswith(".jpg")])
+        if len(frame_files) == 0:
+            print(f"⚠️ No frames found for {vid}, logging failure.")
+            with open(log_file, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([vid, "failed_no_frames"])
+            continue
+
+        try:
+            all_embeddings = []
+            for f in frame_files:
+                img_path = os.path.join(frame_folder, f)
+                image = preprocess(Image.open(img_path).convert("RGB")).unsqueeze(0).to(device)
+
+                with torch.no_grad():
+                    emb = model.encode_image(image)
+                    emb = emb / emb.norm(dim=-1, keepdim=True)  # normalize
+                    all_embeddings.append(emb.cpu().numpy())
+
+            # Average embeddings
+            video_emb = np.mean(np.vstack(all_embeddings), axis=0)
+
+            # Save
+            out_file = os.path.join(video_embeddings_dir, f"{vid}.npy")
+            np.save(out_file, video_emb)
+            print(f"Saved embedding for {vid} → {out_file}")
+
+        except Exception as e:
+            print(f"⚠️ Failed to embed video {vid}: {e}")
+            with open(log_file, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([vid, "failed_processing"])
+
+# extract_video_embeddings(video_frames_path, video_embeddings_path, video_embeddings_log_file)
