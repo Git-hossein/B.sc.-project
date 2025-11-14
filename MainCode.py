@@ -57,8 +57,23 @@ if not os.path.exists(video_embeddings_log_file):
 videos = [
     ("--0PQM4-hqg", 30, "waterfall_burbling"),
     ("--56QUhyDQM", 185, "playing_tennis"),
-    ("--5OkAjCI7g", 40, "people_belly_laughing")
+    ("--5OkAjCI7g", 40, "people_belly_laughing"),
+    ("--Lj4Y_96f0",120,"bee, wasp, etc. buzzing"),
+    ("--Nrb6rtheE",10,"baby babbling"),
+    ("--PlJNEnf-s",288,"bee, wasp, etc. buzzing"),
+    ("--Q8wkZvDZE",150,"people whispering"),
+    ("--QVnZXkb_Y",74,"coyote howling"),
+    ("--QVnZXkb_Y",98,"coyote howling"),
+    ("--R3QLObQ5I",319,"metronome"),
+    ("--SQyOb8eS0",30,"playing harp"),
+    ("--SvivLlKLU",137,"airplane"),
+    ("--SvivLlKLU",662,"airplane"),
+    ("--TF_YkxfvQ",1,"rope skipping"),
+    ("--TF_YkxfvQ",12,"rope skipping"),
+    ("--TKJIv9aY4",210,"ambulance siren"),
+    ("--TKJIv9aY4",282,"ambulance siren"),
 ]
+
 
 def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10):
     """
@@ -132,7 +147,7 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
                 writer.writerow([video_id, download_status, trim_status])
 
 
-# download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
+download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
 
 def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
     """
@@ -182,7 +197,7 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
             print(f"⚠️ Failed to extract frames for {video_id}: {e}")
 
 
-# extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
+extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
 
 def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000, log_file=extract_audio_log_file):
     """
@@ -229,7 +244,7 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-# extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
+extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
 
 
 
@@ -284,7 +299,7 @@ def extract_audio_embeddings(audios_dir, embeddings_dir, log_file="./Logs_audio_
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-# extract_audio_embeddings(audios_path, audio_embeddings_path)
+extract_audio_embeddings(audios_path, audio_embeddings_path)
 
 
 def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_embeddings_log_file,
@@ -308,6 +323,13 @@ def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_em
     print(f"Found {len(video_ids)} videos for embedding extraction.")
 
     for vid in video_ids:
+        out_file = os.path.join(video_embeddings_dir, f"{vid}.npy")
+        
+        # Skip if embedding already exists
+        if os.path.exists(out_file):
+            print(f"⏭ Embedding already exists for {vid}, skipping...")
+            continue
+
         frame_folder = os.path.join(frames_dir, vid)
         frame_files = sorted([f for f in os.listdir(frame_folder) if f.endswith(".jpg")])
         if len(frame_files) == 0:
@@ -332,9 +354,8 @@ def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_em
             video_emb = np.mean(np.vstack(all_embeddings), axis=0)
 
             # Save
-            out_file = os.path.join(video_embeddings_dir, f"{vid}.npy")
             np.save(out_file, video_emb)
-            print(f"Saved embedding for {vid} → {out_file}")
+            print(f"✅ Saved embedding for {vid} → {out_file}")
 
         except Exception as e:
             print(f"⚠️ Failed to embed video {vid}: {e}")
@@ -342,4 +363,4 @@ def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_em
                 writer = csv.writer(f)
                 writer.writerow([vid, "failed_processing"])
 
-# extract_video_embeddings(video_frames_path, video_embeddings_path, video_embeddings_log_file)
+extract_video_embeddings(video_frames_path, video_embeddings_path, video_embeddings_log_file)
