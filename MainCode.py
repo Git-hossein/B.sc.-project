@@ -54,26 +54,53 @@ if not os.path.exists(video_embeddings_log_file):
         writer.writerow(["video_id", "embed_status"])
 
 # List of example videos with start time and labels
-videos = [
-    ("--0PQM4-hqg", 30, "waterfall_burbling"),
-    ("--56QUhyDQM", 185, "playing_tennis"),
-    ("--5OkAjCI7g", 40, "people_belly_laughing"),
-    ("--Lj4Y_96f0",120,"bee, wasp, etc. buzzing"),
-    ("--Nrb6rtheE",10,"baby babbling"),
-    ("--PlJNEnf-s",288,"bee, wasp, etc. buzzing"),
-    ("--Q8wkZvDZE",150,"people whispering"),
-    ("--QVnZXkb_Y",74,"coyote howling"),
-    ("--QVnZXkb_Y",98,"coyote howling"),
-    ("--R3QLObQ5I",319,"metronome"),
-    ("--SQyOb8eS0",30,"playing harp"),
-    ("--SvivLlKLU",137,"airplane"),
-    ("--SvivLlKLU",662,"airplane"),
-    ("--TF_YkxfvQ",1,"rope skipping"),
-    ("--TF_YkxfvQ",12,"rope skipping"),
-    ("--TKJIv9aY4",210,"ambulance siren"),
-    ("--TKJIv9aY4",282,"ambulance siren"),
-]
+# videos_training = [
+#     ("--0PQM4-hqg", 30, "waterfall_burbling"),
+#     ("--56QUhyDQM", 185, "playing_tennis"),
+#     ("--5OkAjCI7g", 40, "people_belly_laughing"),
+#     ("--Lj4Y_96f0",120,"bee, wasp, etc. buzzing"),
+#     ("--Nrb6rtheE",10,"baby babbling"),
+#     ("--PlJNEnf-s",288,"bee, wasp, etc. buzzing"),
+#     ("--Q8wkZvDZE",150,"people whispering"),
+#     ("--QVnZXkb_Y",74,"coyote howling"),
+#     ("--QVnZXkb_Y",98,"coyote howling"),
+#     ("--R3QLObQ5I",319,"metronome"),
+#     ("--SQyOb8eS0",30,"playing harp"),
+#     ("--SvivLlKLU",137,"airplane"),
+#     ("--SvivLlKLU",662,"airplane"),
+#     ("--TF_YkxfvQ",1,"rope skipping"),
+#     ("--TF_YkxfvQ",12,"rope skipping"),
+#     ("--TKJIv9aY4",210,"ambulance siren"),
+#     ("--TKJIv9aY4",282,"ambulance siren"),
+# ]
+def training_videos_generator(csv_path, nmany=1033, start=0):
+    """
+    Yields (video_id, start_sec, label) for 'train' rows.
+    Skips the first `start` training rows before yielding.
+    """
+    print("extracting training videos from csv...")
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        skipped = 0
+        yielded = 0
+        for row in reader:
+            if row[3].strip() != "train":
+                continue  # skip non-training rows
 
+            # Skip first `start` items
+            if skipped < start:
+                skipped += 1
+                continue
+            # Stop once we yield nmany items
+            if yielded >= nmany:
+                break
+
+            yielded += 1
+            yield (row[0], int(row[1]), row[2])  # (YouTube ID, start_sec, caption)
+
+            
+
+videos_training = training_videos_generator("vggsound.csv", 1033, 0) # last called with ("vggsound.csv", 2000 - 779, 779) and stoped at when i had 1026 trimmed files
 
 def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10):
     """
@@ -105,7 +132,7 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
         # Download full video
         if not os.path.exists(full_file):
             print(f"Downloading full video {video_id}...")
-            ydl_opts = {'format': 'mp4', 'outtmpl': full_file}
+            ydl_opts = {'format': 'mp4', 'outtmpl': full_file, 'cookiefile': 'cookies.txt'}
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
@@ -147,7 +174,7 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
                 writer.writerow([video_id, download_status, trim_status])
 
 
-# download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
+#download_and_trim_videos(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
 
 def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
     """
@@ -197,7 +224,7 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
             print(f"⚠️ Failed to extract frames for {video_id}: {e}")
 
 
-# extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
+#extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
 
 def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000, log_file=extract_audio_log_file):
     """
@@ -244,7 +271,7 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-# extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
+#extract_audio_from_videos(trimmed_videos_path, audios_path, sample_rate=16000)
 
 
 
@@ -299,7 +326,7 @@ def extract_audio_embeddings(audios_dir, embeddings_dir, log_file="./Logs_audio_
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
 
-# extract_audio_embeddings(audios_path, audio_embeddings_path)
+#extract_audio_embeddings(audios_path, audio_embeddings_path)
 
 
 def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_embeddings_log_file,
@@ -411,7 +438,8 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
 
 
 # Example usage:
-query_embedding = np.load(os.path.join(video_embeddings_path, "--PlJNEnf-s.npy")) # bee, wasp, etc. buzzing
-top_similar = find_top_k_similar(query_embedding, audio_embeddings_path, k=5)
-for fname, score in top_similar:
-    print(fname, score)
+#print("example time:")
+# query_embedding = np.load(os.path.join(video_embeddings_path, "--PlJNEnf-s.npy")) # bee, wasp, etc. buzzing
+# top_similar = find_top_k_similar(query_embedding, audio_embeddings_path, k=5)
+# for fname, score in top_similar:
+#     print(fname, score)
