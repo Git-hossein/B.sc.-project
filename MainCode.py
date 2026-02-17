@@ -446,12 +446,13 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
     similarities.sort(key=lambda x: x[1], reverse=True)
 
     # Apply softmax to similarity scores for better interpretability (optional)
-    topK_pairs = similarities[:k]
-    scores = np.array([pair[1] for pair in topK_pairs])
+    scores = np.array([pair[1] for pair in similarities])
     softmax_scores = softmax(scores)
+    topK_pairs = similarities[:k]
+    topK_softmax_scores = softmax_scores[:k]
     
     # Return top-k with corresponding softmax score
-    return [(pair[0], prob) for pair, prob in zip(topK_pairs, softmax_scores)]
+    return [(pair[0], prob) for pair, prob in zip(topK_pairs, topK_softmax_scores)]
 
 
 # =============                     The Inference section                             ====================
