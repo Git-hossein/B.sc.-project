@@ -409,7 +409,8 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     b_norm = b / np.linalg.norm(b)
     return float(np.dot(a_norm, b_norm))
 
-def softmax(scores):
+def softmax(scores, T = 1.0):
+    scores = np.array(scores) / T
     scores_max = np.max(scores)
     exponentials = np.exp(scores - scores_max)
     return exponentials / np.sum(exponentials)
