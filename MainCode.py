@@ -409,6 +409,13 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     b_norm = b / np.linalg.norm(b)
     return float(np.dot(a_norm, b_norm))
 
+def softmax(scores):
+    scores_max = np.max(scores)
+    exponentials = np.exp(scores - scores_max)
+    return exponentials / np.sum(exponentials)
+
+
+
 def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
     """
     Find the top-k most similar embeddings in a directory to the query embedding.
@@ -438,8 +445,13 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
     # Sort by similarity descending
     similarities.sort(key=lambda x: x[1], reverse=True)
 
-    # Return top-k
-    return similarities[:k]
+    # Apply softmax to similarity scores for better interpretability (optional)
+    topK_pairs = similarities[:k]
+    scores = np.array([pair[1] for pair in topK_pairs])
+    softmax_scores = softmax(scores)
+    
+    # Return top-k with corresponding softmax score
+    return [(pair[0], prob) for pair, prob in zip(topK_pairs, softmax_scores)]
 
 
 # =============                     The Inference section                             ====================
