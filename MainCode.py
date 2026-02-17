@@ -9,6 +9,9 @@ from PIL import Image
 import torch
 import clip
 import csv
+import random
+import pprint
+import shutil
 
 # Base dataset path
 base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
@@ -20,11 +23,13 @@ video_frames_path = os.path.join(base_path, "frames")
 audios_path = os.path.join(base_path, "audios")
 audio_embeddings_path = os.path.join(base_path, "audio_embeddings")
 video_embeddings_path = os.path.join(base_path, "video_embeddings")
+inferred_example_path = ("./inferred_examples")
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 os.makedirs(audios_path, exist_ok=True)
 os.makedirs(audio_embeddings_path, exist_ok=True)
 os.makedirs(video_embeddings_path, exist_ok=True)
+os.makedirs(inferred_example_path, exist_ok=True)
 
 # Log files path
 download_and_trim_log_file = ("./Logs_download_trim.csv")
@@ -437,9 +442,134 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
     return similarities[:k]
 
 
+# =============                     The Inference section                             ====================
+
 # Example usage:
 #print("example time:")
 # query_embedding = np.load(os.path.join(video_embeddings_path, "--PlJNEnf-s.npy")) # bee, wasp, etc. buzzing
 # top_similar = find_top_k_similar(query_embedding, audio_embeddings_path, k=5)
 # for fname, score in top_similar:
 #     print(fname, score)
+
+
+def infer_similar_audio(query=None, top_k=5, 
+                        single_mode=True, random_sample_count=1):
+    """
+    Retrieve top-k most similar audio embeddings for given video embeddings.
+
+    Args:
+        video_embeddings_dir (str): Folder containing video embeddings (.npy files).
+        top_k (int): Number of top similar audios to return.
+        single_mode (bool): If True, use a single video embedding; 
+                            if False, randomly sample multiple videos.
+        query (str or str path): Either YouTube ID (without .npy) or full path to video embedding.
+                                 Only used in single_mode.
+        random_sample_count (int): Number of random videos to sample in random-sample mode.
+
+    Returns:
+        dict: 
+            {
+                query_embedding_name: {
+                    audio_filename1: similarity_score1,
+                    audio_filename2: similarity_score2,
+                    ...
+                },
+                ...
+            }
+    """
+    results = {}
+    audio_embeddings_dir = audio_embeddings_path  # fixed path from your base_path
+    video_embeddings_dir = video_embeddings_path
+
+    # Helper to load embedding given path or ID
+    def load_embedding(query):
+        if os.path.exists(query):  # full path
+            return np.load(query), os.path.basename(query)
+        else:  # assume query is YouTube ID
+            emb_path = os.path.join(video_embeddings_dir, f"{query}.npy")
+            if not os.path.exists(emb_path):
+                raise FileNotFoundError(f"Video embedding not found for ID {query}")
+            return np.load(emb_path), f"{query}.npy"
+
+    # --- SINGLE MODE ---
+    if single_mode:
+        if query is None:
+            raise ValueError("In single_mode, `query` must be provided (ID or path).")
+        
+        video_emb, key_name = load_embedding(query)
+        top_similar = find_top_k_similar(video_emb, audio_embeddings_dir, k=top_k)
+        # convert to dict {filename: similarity}
+        results[key_name] = {fname: score for fname, score in top_similar}
+
+    # --- RANDOM SAMPLE MODE ---
+    else:
+        # List all video embeddings
+        all_video_files = [f for f in os.listdir(video_embeddings_dir) if f.endswith(".npy")]
+        if len(all_video_files) == 0:
+            raise FileNotFoundError("No video embeddings found in the directory.")
+        if random_sample_count > len(all_video_files):
+            random_sample_count = len(all_video_files)
+        
+        sampled_videos = random.sample(all_video_files, random_sample_count)
+        
+        for vid_file in sampled_videos:
+            vid_path = os.path.join(video_embeddings_dir, vid_file)
+            video_emb = np.load(vid_path)
+            top_similar = find_top_k_similar(video_emb, audio_embeddings_dir, k=top_k)
+            results[vid_file] = {fname: score for fname, score in top_similar}
+
+    return results
+
+example1 = infer_similar_audio(query="--PlJNEnf-s", top_k=5, single_mode=False, random_sample_count=3)
+
+
+
+def create_inference_example(inference_dict):
+    """
+    Given a dictionary returned by `infer_similar_audio`, create a folder structure
+    with trimmed videos and matched audio files for easy viewing.
+
+    Folder structure:
+    inferred_example_path/
+        query_video_name/
+            query_video_name.mp4
+            matched_audio1.wav
+            matched_audio2.wav
+            ...
+
+    Args:
+        inference_dict (dict): output of `infer_similar_audio`
+    """
+    for video_key, audio_matches in inference_dict.items():
+        # Remove .npy from video key to get folder/video name
+        video_name = os.path.splitext(video_key)[0]
+        video_folder = os.path.join(inferred_example_path, video_name)
+
+        # Create or replace folder
+        if os.path.exists(video_folder):
+            shutil.rmtree(video_folder)
+        os.makedirs(video_folder, exist_ok=True)
+
+        # Copy trimmed video
+        trimmed_video_file = os.path.join(trimmed_videos_path, f"{video_name}.mp4")
+        if os.path.exists(trimmed_video_file):
+            shutil.copy(trimmed_video_file, os.path.join(video_folder, f"{video_name}.mp4"))
+        else:
+            print(f"⚠️ Trimmed video not found for {video_name}, skipping video copy.")
+
+        # Copy matched audio files
+        for audio_file in audio_matches.keys():
+            # Remove .npy if present to get actual wav filename
+            audio_name = os.path.splitext(audio_file)[0] + ".wav" if audio_file.endswith(".npy") else audio_file
+            audio_source = os.path.join(audios_path, audio_name)
+            if os.path.exists(audio_source):
+                shutil.copy(audio_source, os.path.join(video_folder, audio_name))
+            else:
+                print(f"⚠️ Audio file {audio_name} not found for {video_name}, skipping.")
+
+    print(f"☑️ Inference examples created in {inferred_example_path}")
+
+
+
+pprint.pprint(example1)
+create_inference_example(example1)
