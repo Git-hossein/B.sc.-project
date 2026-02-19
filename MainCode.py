@@ -534,7 +534,7 @@ def infer_similar_audio(query=None, top_k=5,
 
     return results
 
-example1 = infer_similar_audio(query="--PlJNEnf-s", top_k=5, single_mode=False, random_sample_count=3)
+example1 = infer_similar_audio(query="--PlJNEnf-s", top_k=5, single_mode=True, random_sample_count=3)
 
 
 
@@ -585,5 +585,5 @@ def create_inference_example(inference_dict):
 
 
 
-pprint.pprint(example1)
-create_inference_example(example1)
+pprint.pprint(example1, sort_dicts=False)
+# create_inference_example(example1)
