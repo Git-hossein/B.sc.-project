@@ -413,7 +413,7 @@ def softmax(scores, T = 1.0):
     scores = np.array(scores) / T
     scores_max = np.max(scores)
     exponentials = np.exp(scores - scores_max)
-    return exponentials / np.sum(exponentials)
+    return (exponentials / np.sum(exponentials)).tolist()
 
 
 
@@ -469,7 +469,9 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
 def infer_similar_audio(query=None, top_k=5, 
                         single_mode=True, random_sample_count=1):
     """
-    Retrieve top-k most similar audio embeddings for given video embeddings.
+    Retrieve top-k most similar audio embeddings for given video embeddings. If the query is the full path to a video embedding,
+    it will be used directly. If the query is a YouTube ID, it will be assumed that its embedding is stored 
+    as <query>.npy in the <video_embeddings_path> folder.
 
     Args:
         video_embeddings_dir (str): Folder containing video embeddings (.npy files).
