@@ -1,3 +1,4 @@
+from path_settings.path_settings import PathSettings
 import os
 import csv
 import yt_dlp
@@ -14,16 +15,17 @@ import pprint
 import shutil
 
 # Base dataset path
-base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
+paths = PathSettings()
+paths.set_to_windows_paths()
 
 # Create separate folders for full and trimmed clips
-full_videos_path = os.path.join(base_path, "full_videos")
-trimmed_videos_path = os.path.join(base_path, "trimmed_videos")
-video_frames_path = os.path.join(base_path, "frames")
-audios_path = os.path.join(base_path, "audios")
-audio_embeddings_path = os.path.join(base_path, "audio_embeddings")
-video_embeddings_path = os.path.join(base_path, "video_embeddings")
-inferred_example_path = ("./inferred_examples")
+full_videos_path = paths.full_videos_path
+trimmed_videos_path = paths.trimmed_videos_path
+video_frames_path = paths.video_frames_path
+audios_path = paths.audios_path
+audio_embeddings_path = paths.audio_embeddings_path
+video_embeddings_path = paths.video_embeddings_path
+inferred_example_path = paths.inferred_example_path
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 os.makedirs(audios_path, exist_ok=True)
@@ -32,10 +34,10 @@ os.makedirs(video_embeddings_path, exist_ok=True)
 os.makedirs(inferred_example_path, exist_ok=True)
 
 # Log files path
-download_and_trim_log_file = ("./Logs_download_trim.csv")
-extract_audio_log_file     = ("./Logs_extract_audio.csv")
-embeddings_audio_log_file  = ("./Logs_audio_embeddings.csv")
-video_embeddings_log_file  = ("./Logs_video_embeddings.csv")
+download_and_trim_log_file = paths.download_and_trim_log_file
+extract_audio_log_file = paths.extract_audio_log_file
+embeddings_audio_log_file = paths.embeddings_audio_log_file
+video_embeddings_log_file = paths.video_embeddings_log_file
 
 # Create log file with headers if it doesn't exist
 if not os.path.exists(download_and_trim_log_file):
@@ -588,4 +590,5 @@ def create_inference_example(inference_dict):
 
 
 pprint.pprint(example1, sort_dicts=False)
+pprint.pp(infer_similar_audio(query="-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3), sort_dicts=False)
 # create_inference_example(example1)
