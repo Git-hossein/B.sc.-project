@@ -4,7 +4,7 @@ class PathSettings:
     def __init__(self):
         # Define both base paths
         self._windows_base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
-        self._linux_base_path = "/mnt/d/Bsc.Thesis_Datasets/vggsound"   # <- placeholder, you fill later
+        self._linux_base_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound"
 
         # Default system (you can change this)
         self.base_path = self._windows_base_path
