@@ -473,15 +473,14 @@ def infer_similar_audio(query=None, top_k=5,
     """
     Retrieve top-k most similar audio embeddings for given video embeddings. If the query is the full path to a video embedding,
     it will be used directly. If the query is a YouTube ID, it will be assumed that its embedding is stored 
-    as <query>.npy in the <video_embeddings_path> folder.
+    as "query.npy" in the `video_embeddings_path` folder.
 
     Args:
-        video_embeddings_dir (str): Folder containing video embeddings (.npy files).
+        query (str or str path): Either YouTube ID (without .npy) or full path to video embedding.
+                                 Only used in single_mode.
         top_k (int): Number of top similar audios to return.
         single_mode (bool): If True, use a single video embedding; 
                             if False, randomly sample multiple videos.
-        query (str or str path): Either YouTube ID (without .npy) or full path to video embedding.
-                                 Only used in single_mode.
         random_sample_count (int): Number of random videos to sample in random-sample mode.
 
     Returns:
