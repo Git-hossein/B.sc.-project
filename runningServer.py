@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+import time
 from path_settings import paths_config
 
 
@@ -92,24 +93,111 @@ def upload_to_tcml(json_path: str, upload_set: set[str])->bool:
         return False
 
     
-def sendResultsToTCML(data_dict):
-    try:
+# def sendResultsToTCML(data_dict):
+#     try:
 
-        print("... Preparing batch for transfer...")
+#         print("... Preparing batch for transfer...")
 
-        json_path, file_set = prepare_batch_for_server(data_dict)
-        success = upload_to_tcml(json_path, file_set)
+#         json_path, file_set = prepare_batch_for_server(data_dict)
+#         success = upload_to_tcml(json_path, file_set)
 
-        if success:
-            print("...Data is now on the server. Ready to trigger SLURM...")
-            # --- NEXT STEP: Trigger the sbatch here ---
-            # job_id = trigger_sbatch_remote() 
-            # return job_id
+#         if success:
+#             print("...Data is now on the server. Ready to trigger SLURM...")
+#             # --- NEXT STEP: Trigger the sbatch here ---
+#             # job_id = trigger_sbatch_remote() 
+#             # return job_id
+#             return True
+#         else:
+#             print("❌ Upload failed during the rsync process.")
+#             return False
+
+#     except Exception as e:
+#         print(f"💥 An error occurred in the bridge: {e}")
+#         return False
+
+
+def trigger_sbatch_remote():
+    remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
+    sbatch_command = "sbatch /home/sherkat/generate_audio.sbatch"
+
+    print("...Submitting job to Slurm...")
+    cmd = ["ssh", remote_host, sbatch_command]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        # Extract the ID using Regex
+        job_id = result.stdout.strip()
+        print(f"✅ Job submitted! ID: {job_id}")
+        return job_id
+            
+    print(f"❌ Slurm submission failed: {result.stderr}")
+    return None
+
+
+def wait_for_job_completion(job_id):
+    remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
+    sentinel_path = f"/home/sherkat/audio_outputs/JOB_{job_id}_DONE"
+    
+    print(f"⏳ Waiting for Job {job_id} to finish...")
+    print("(You can go grab a coffee, this will take a while.)")
+
+    while True:
+        # Check if the sentinel file exists on the server
+        check_cmd = ["ssh", remote_host, f"[ -f {sentinel_path} ]"]
+        result = subprocess.run(check_cmd)
+        
+        if result.returncode == 0:
+            print(f"\n ...Job {job_id} complete! Sentinel file detected...")
             return True
-        else:
-            print("❌ Upload failed during the rsync process.")
-            return False
+            
+        # Optional: Print a dot to show we are still alive
+        print(".", end="", flush=True)
+        time.sleep(30) # Check every 30 seconds
 
-    except Exception as e:
-        print(f"💥 An error occurred in the bridge: {e}")
-        return False
+
+def download_results(local_dest, inferred_dict = None):
+    num_sentinel_file = 1
+    num_output_audio_per_video = 2
+    remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
+    remote_dir = "~/audio_outputs"
+    remote_source = f"{remote_host}:{remote_dir}/"
+
+    if inferred_dict is not None:
+        original_count = len(inferred_dict)
+
+        remote_cmd = f"ls -1 {remote_dir} | wc -l"
+        cmd = ["ssh", remote_host, remote_cmd]
+        temp = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if temp.returncode != 0:
+            raise Exception(f"Failed to reach server: {temp.stderr}")
+
+        actual_count = int(temp.stdout.strip())
+        expected_total = (num_output_audio_per_video * original_count) + num_sentinel_file
+    
+        if expected_total != actual_count:
+            raise Exception(
+                f"...Integrity Mismatch: Expected {expected_total} files"
+                f" but found {actual_count}!"
+            )
+    
+    print(f"...Downloading results to {local_dest}...")
+    # -a (archive), -v (verbose), -z (compress)
+    cmd = ["rsync", "-av", remote_source, local_dest]
+    
+    subprocess.run(cmd, check=True)
+    print("...All files downloaded successfully!")
+
+
+def run_tcml_audio_pipeline(data_dict):
+
+
+    json_path, file_set = prepare_batch_for_server(data_dict)
+    success = upload_to_tcml(json_path, file_set)
+
+    if success:
+        job_id = trigger_sbatch_remote()
+        complete = wait_for_job_completion(job_id)
+        if complete:
+            download_results(paths_config._TCML_server_output_generated, data_dict)
