@@ -1,10 +1,14 @@
 import os
 
-class PathSettings:
+class _PathSettings:
     def __init__(self):
         # Define both base paths
         self._windows_base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
         self._linux_base_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound"
+
+
+        # Define TCML server path
+        self._TCML_server_base_path = "./tcml_server"
 
         # Default system (you can change this)
         self.base_path = self._windows_base_path
@@ -23,6 +27,8 @@ class PathSettings:
         self.audio_embeddings_path = os.path.join(self.base_path, "audio_embeddings")
         self.video_embeddings_path = os.path.join(self.base_path, "video_embeddings")
         self.inferred_example_path = "./inferred_examples"
+        self._TCML_server_input = os.path.join(self._TCML_server_base_path, "input")
+        self._TCML_server_output = os.path.join(self._TCML_server_base_path, "output")
 
         # Logs (same for both systems)
         self.download_and_trim_log_file = "./Logs_download_trim.csv"
@@ -40,3 +46,6 @@ class PathSettings:
     def set_to_linux_paths(self):
         self.base_path = self._linux_base_path
         self._build_paths()
+
+
+paths_config = _PathSettings()
