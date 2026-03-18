@@ -8,7 +8,7 @@ class _PathSettings:
 
 
         # Define TCML server path
-        self._TCML_server_base_path = "./tcml_server"
+        self._TCML_server_base_path = "./tcml_exchange"
 
         # Default system (you can change this)
         self.base_path = self._windows_base_path
@@ -28,7 +28,7 @@ class _PathSettings:
         self.video_embeddings_path = os.path.join(self.base_path, "video_embeddings")
         self.inferred_example_path = "./inferred_examples"
         self._TCML_server_input = os.path.join(self._TCML_server_base_path, "input")
-        self._TCML_server_output = os.path.join(self._TCML_server_base_path, "output")
+        self._TCML_server_output_generated = os.path.join(self._TCML_server_base_path, "output/generated_examples")
 
         # Logs (same for both systems)
         self.download_and_trim_log_file = "./Logs_download_trim.csv"
