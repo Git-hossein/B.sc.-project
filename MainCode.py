@@ -1,4 +1,4 @@
-from path_settings.path_settings import PathSettings
+from path_settings import paths_config
 import os
 import csv
 import yt_dlp
@@ -12,20 +12,20 @@ import clip
 import csv
 import random
 import pprint
+import json
 import shutil
 
 # Base dataset path
-paths = PathSettings()
-paths.set_to_windows_paths()
+paths_config.set_to_linux_paths()
 
 # Create separate folders for full and trimmed clips
-full_videos_path = paths.full_videos_path
-trimmed_videos_path = paths.trimmed_videos_path
-video_frames_path = paths.video_frames_path
-audios_path = paths.audios_path
-audio_embeddings_path = paths.audio_embeddings_path
-video_embeddings_path = paths.video_embeddings_path
-inferred_example_path = paths.inferred_example_path
+full_videos_path = paths_config.full_videos_path
+trimmed_videos_path = paths_config.trimmed_videos_path
+video_frames_path = paths_config.video_frames_path
+audios_path = paths_config.audios_path
+audio_embeddings_path = paths_config.audio_embeddings_path
+video_embeddings_path = paths_config.video_embeddings_path
+inferred_example_path = paths_config.inferred_example_path
 os.makedirs(full_videos_path, exist_ok=True)
 os.makedirs(trimmed_videos_path, exist_ok=True)
 os.makedirs(audios_path, exist_ok=True)
@@ -34,10 +34,10 @@ os.makedirs(video_embeddings_path, exist_ok=True)
 os.makedirs(inferred_example_path, exist_ok=True)
 
 # Log files path
-download_and_trim_log_file = paths.download_and_trim_log_file
-extract_audio_log_file = paths.extract_audio_log_file
-embeddings_audio_log_file = paths.embeddings_audio_log_file
-video_embeddings_log_file = paths.video_embeddings_log_file
+download_and_trim_log_file = paths_config.download_and_trim_log_file
+extract_audio_log_file = paths_config.extract_audio_log_file
+embeddings_audio_log_file = paths_config.embeddings_audio_log_file
+video_embeddings_log_file = paths_config.video_embeddings_log_file
 
 # Create log file with headers if it doesn't exist
 if not os.path.exists(download_and_trim_log_file):
@@ -419,7 +419,7 @@ def softmax(scores, T = 1.0):
 
 
 
-def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
+def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5, T: float = 1.0):
     """
     Find the top-k most similar embeddings in a directory to the query embedding.
 
@@ -427,6 +427,7 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
         query_emb (np.ndarray): Query embedding (1D array).
         embeddings_dir (str): Path to folder containing .npy embeddings.
         k (int): Number of top results to return.
+        T (int): Temperature param. used by softmax
 
     Returns:
         List of tuples: [(filename, similarity_score), ...] sorted by similarity descending.
@@ -447,15 +448,14 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
 
     # Sort by similarity descending
     similarities.sort(key=lambda x: x[1], reverse=True)
+    similarities = similarities[:k]
 
     # Apply softmax to similarity scores for better interpretability (optional)
     scores = np.array([pair[1] for pair in similarities])
-    softmax_scores = softmax(scores)
-    topK_pairs = similarities[:k]
-    topK_softmax_scores = softmax_scores[:k]
+    softmax_scores = softmax(scores, T)
     
     # Return top-k with corresponding softmax score
-    return [(pair[0], prob) for pair, prob in zip(topK_pairs, topK_softmax_scores)]
+    return [(pair[0], prob) for pair, prob in zip(similarities, softmax_scores)]
 
 
 # =============                     The Inference section                             ====================
@@ -469,7 +469,7 @@ def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5):
 
 
 def infer_similar_audio(query=None, top_k=5, 
-                        single_mode=True, random_sample_count=1):
+                        single_mode=True, random_sample_count=1, temp:float = 1.0):
     """
     Retrieve top-k most similar audio embeddings for given video embeddings. If the query is the full path to a video embedding,
     it will be used directly. If the query is a YouTube ID, it will be assumed that its embedding is stored 
@@ -482,6 +482,7 @@ def infer_similar_audio(query=None, top_k=5,
         single_mode (bool): If True, use a single video embedding; 
                             if False, randomly sample multiple videos.
         random_sample_count (int): Number of random videos to sample in random-sample mode.
+        T (int): Temperature param. used by softmax for inference
 
     Returns:
         dict: 
@@ -514,7 +515,7 @@ def infer_similar_audio(query=None, top_k=5,
             raise ValueError("In single_mode, `query` must be provided (ID or path).")
         
         video_emb, key_name = load_embedding(query)
-        top_similar = find_top_k_similar(video_emb, audio_embeddings_dir, k=top_k)
+        top_similar = find_top_k_similar(video_emb, audio_embeddings_dir, k=top_k, T = temp)
         # convert to dict {filename: similarity}
         results[key_name] = {fname: score for fname, score in top_similar}
 
@@ -532,7 +533,7 @@ def infer_similar_audio(query=None, top_k=5,
         for vid_file in sampled_videos:
             vid_path = os.path.join(video_embeddings_dir, vid_file)
             video_emb = np.load(vid_path)
-            top_similar = find_top_k_similar(video_emb, audio_embeddings_dir, k=top_k)
+            top_similar = find_top_k_similar(video_emb, audio_embeddings_dir, k=top_k, T = temp)
             results[vid_file] = {fname: score for fname, score in top_similar}
 
     return results
@@ -588,6 +589,17 @@ def create_inference_example(inference_dict):
 
 
 
-pprint.pprint(example1, sort_dicts=False)
-pprint.pp(infer_similar_audio(query="-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3), sort_dicts=False)
+# pprint.pprint(example1, sort_dicts=False)
+# pprint.pp(infer_similar_audio(query="-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3), sort_dicts=False)
+
 # create_inference_example(example1)
+
+
+if __name__ == "__main__":
+    vids = ["--XInAaMS6k", "-0gYWIOfqdM", "-3M-k4nIYIM", "-4ItJ9yTz_c", "-4o0jRbgHr4", "-4rdRn-FRXo", "-6lkiUAf_cQ", "-6VFTlZsft4"]
+   
+    for vid in vids:
+        print(",\n")
+        pprint.pp(infer_similar_audio(query= vid, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
+        print(",\n")
+   
