@@ -60,33 +60,13 @@ if not os.path.exists(video_embeddings_log_file):
         writer = csv.writer(f)
         writer.writerow(["video_id", "embed_status"])
 
-# List of example videos with start time and labels
-# videos_training = [
-#     ("--0PQM4-hqg", 30, "waterfall_burbling"),
-#     ("--56QUhyDQM", 185, "playing_tennis"),
-#     ("--5OkAjCI7g", 40, "people_belly_laughing"),
-#     ("--Lj4Y_96f0",120,"bee, wasp, etc. buzzing"),
-#     ("--Nrb6rtheE",10,"baby babbling"),
-#     ("--PlJNEnf-s",288,"bee, wasp, etc. buzzing"),
-#     ("--Q8wkZvDZE",150,"people whispering"),
-#     ("--QVnZXkb_Y",74,"coyote howling"),
-#     ("--QVnZXkb_Y",98,"coyote howling"),
-#     ("--R3QLObQ5I",319,"metronome"),
-#     ("--SQyOb8eS0",30,"playing harp"),
-#     ("--SvivLlKLU",137,"airplane"),
-#     ("--SvivLlKLU",662,"airplane"),
-#     ("--TF_YkxfvQ",1,"rope skipping"),
-#     ("--TF_YkxfvQ",12,"rope skipping"),
-#     ("--TKJIv9aY4",210,"ambulance siren"),
-#     ("--TKJIv9aY4",282,"ambulance siren"),
-# ]
-def training_videos_generator(csv_path, nmany=1033, start=0):
+def vggsound_training_videos_generator(vggsound_path, nmany=1033, start=0):
     """
     Yields (video_id, start_sec, label) for 'train' rows.
     Skips the first `start` training rows before yielding.
     """
     print("extracting training videos from csv...")
-    with open(csv_path, "r", encoding="utf-8") as f:
+    with open(vggsound_path, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
         skipped = 0
         yielded = 0
@@ -107,9 +87,53 @@ def training_videos_generator(csv_path, nmany=1033, start=0):
 
             
 
-videos_training = training_videos_generator("vggsound.csv", 1033, 0) # last called with ("vggsound.csv", 2000 - 779, 779) and stoped at when i had 1026 trimmed files
+videos_training = vggsound_training_videos_generator("vggsound.csv", 1033, 0) # last called with ("vggsound.csv", 2000 - 779, 779) and stoped at when i had 1026 trimmed files
 
-def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_file, clip_length=10):
+
+def download_youtube_video(video_id, output_path):
+    """Downloads a single video if it doesn't exist."""
+    if not os.path.exists(output_path):
+        print(f"Downloading full video {video_id}...")
+        ydl_opts = {'format': 'mp4', 'outtmpl': output_path, 'cookiefile': 'cookies.txt'}
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+            print(f"Downloaded full video {video_id} successfully.")
+            return True
+        except Exception as e:
+            print(f"Failed to download {video_id}: {e}")
+            return False
+    else:
+        print(f"video {output_path} already exists. Skipping download.")
+        return True
+
+
+def trim_video(input_path, output_path, start_sec, duration = 10):
+    """Trims a local video file using ffmpeg."""
+    if os.path.exists(output_path):
+        print(f"video {os.path.basename(input_path)}  has already been trimmed at {output_path}. Skipping trimming.")
+        return True
+    
+    try:
+        subprocess.run([
+                    "ffmpeg", "-y",
+                    "-ss", str(start_sec),     # Fast seek to the start time
+                    "-i", input_path,          # Input file
+                    "-t", str(duration),       # Duration of the clip
+                    "-c:v", "libx264",         # Use H.264 video codec (fixes artifacts)
+                    "-crf", "18",              # High quality (18 is nearly lossless, 23 is default)
+                    "-preset", "veryfast",     # Encoding speed vs compression trade-off
+                    "-c:a", "aac",             # Use AAC audio codec
+                    output_path
+                ], check=True, capture_output=True)
+        print(f"trimmed full video {os.path.basename(input_path)} successfully.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to trim {os.path.basename(input_path)} : {e}")
+        return False
+    
+
+def vggsound_batch_down_trim(video_list, full_videos_path, trimmed_videos_path, log_file, clip_length=10):
     """
     Downloads and trims videos from YouTube.
 
@@ -129,61 +153,64 @@ def download_and_trim_videos(videos, full_videos_path, trimmed_videos_path, log_
             writer = csv.writer(f)
             writer.writerow(["video_id", "download", "trim"])
 
-    for video_id, start_sec, label in videos:
+    for video_id, start_sec, label in video_list:
         full_file = os.path.join(full_videos_path, f"{video_id}_full.mp4")
         clip_file = os.path.join(trimmed_videos_path, f"{video_id}.mp4")
-
-        download_status = "failed"
-        trim_status = "unknown"
+        dl_success = False
+        trim_success = False
 
         # Download full video
-        if not os.path.exists(full_file):
-            print(f"Downloading full video {video_id}...")
-            ydl_opts = {'format': 'mp4', 'outtmpl': full_file, 'cookiefile': 'cookies.txt'}
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-                print(f"Downloaded full video {video_id} successfully.")
-                download_status = "success"
-            except Exception as e:
-                print(f"Failed to download {video_id}: {e}")
-        else:
-            print(f"Full video {video_id} already exists. Skipping download.")
-            download_status = "success"
+        dl_success = download_youtube_video(video_id, full_file)
 
         # Trim video
-        if download_status == "success":
-            if not os.path.exists(clip_file):
-                print(f"Trimming {video_id} to {clip_length} seconds...")
-                try:
-                    subprocess.run([
-                        "ffmpeg",
-                        "-y",  # overwrite if exists
-                        "-ss", str(start_sec),
-                        "-i", full_file,
-                        "-t", str(clip_length),
-                        "-c", "copy",
-                        clip_file
-                    ], check=True)
-                    print(f"Trimmed {video_id} successfully.")
-                    trim_status = "success"
-                except subprocess.CalledProcessError as e:
-                    print(f"Failed to trim {video_id}: {e}")
-                    trim_status = "failed"
-            else:
-                print(f"Trimmed clip {video_id} already exists. Skipping trimming.")
-                trim_status = "success"
+        if dl_success:
+            trim_success = trim_video(full_file, clip_file, start_sec, clip_length)
 
         # Log failures TODO: write a fucntion to prevent the faulty video being logged multiple times
-        if download_status == "failed" or trim_status in ("failed", "unknown"):
+        if not dl_success or not trim_success:
             with open(log_file, mode='a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow([video_id, download_status, trim_status])
+                writer.writerow([video_id,
+                                "success" if dl_success else "failed",
+                                "success" if trim_success else "unknown" if not dl_success else "failed"])
 
 
 #download_and_trim_videos(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
 
-def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
+def extract_frames_from_video(input_video, output_dir, fps = 5):
+        """
+        Extracts frames from a video and puts the resulting frames in the output directory. replaces if frames already exist 
+        """
+        FFMPEG_PATH = r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe"
+        video_name = os.path.splitext(os.path.basename(input_video))[0]
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Output pattern for frames
+        output_pattern = os.path.join(output_dir, "frame_%04d.jpg")
+
+        # ffmpeg command
+        cmd = [
+            FFMPEG_PATH,
+            "-y",
+            "-i", input_video,
+            "-vf", f"fps={fps}",
+            output_pattern,
+            "-hide_banner",
+            "-loglevel", "error"  # suppress ffmpeg spam
+        ]
+
+        try:
+            subprocess.run(cmd, check=True)
+            print(f"✅ Extracted frames for {video_name} successfully.")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Failed to extract frames for {video_name}: {e}")
+            return False
+        
+       
+
+
+def vggsound_batch_extract_frames_from_vids(trimmed_videos_dir, frames_dir, fps=5):
     """
     Extract frames from all trimmed .mp4 videos in `trimmed_videos_dir` and save them 
     into subfolders in `frames_dir`, one subfolder per video.
@@ -194,41 +221,28 @@ def extract_frames_from_videos(trimmed_videos_dir, frames_dir, fps=5):
         fps (int): Number of frames per second to extract (default: 5).
     """
     os.makedirs(frames_dir, exist_ok=True)
+    success_overall = True
 
-    # Only consider trimmed videos
-    videos = [f for f in os.listdir(trimmed_videos_dir) if f.endswith(".mp4")]
-    print(f"Found {len(videos)} trimmed videos for frame extraction.")
-
-    for video in videos:
+    for video in os.listdir(trimmed_videos_dir):
+        if not video.endswith(".mp4"):
+            print(f"skipping {video}: non mp4 file...")
+            continue
         video_path = os.path.join(trimmed_videos_dir, video)
         video_id = os.path.splitext(video)[0]
         output_folder = os.path.join(frames_dir, video_id)
         os.makedirs(output_folder, exist_ok=True)
 
-       # Check if frames already exist
+        # Check if frames already exist
         existing_frames = [f for f in os.listdir(output_folder) if f.startswith("frame_") and f.endswith(".jpg")]
         if existing_frames:
             print(f"⏭ Frames appear to already exist for {video_id}, skipping...")
             continue
 
-        # Output pattern for frames
-        output_pattern = os.path.join(output_folder, "frame_%04d.jpg")
+        success = extract_frames_from_video(video_path, output_folder, fps = fps)
+        if not success: success_overall = False
 
-        # ffmpeg command
-        cmd = [
-            r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe",
-            "-i", video_path,
-            "-vf", f"fps={fps}",
-            output_pattern,
-            "-hide_banner",
-            "-loglevel", "error"  # suppress ffmpeg spam
-        ]
+    return success_overall
 
-        try:
-            subprocess.run(cmd, check=True)
-            print(f"✅ Extracted frames for {video_id} successfully.")
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️ Failed to extract frames for {video_id}: {e}")
 
 
 #extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
