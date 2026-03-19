@@ -6,9 +6,9 @@ class _PathSettings:
         self._windows_base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
         self._linux_base_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound"
 
-
-        # Define TCML server path
+        # Define other base paths
         self._TCML_server_base_path = "./tcml_exchange"
+        self.ffmpeg_path = ""
 
         # Default system (you can change this)
         self.base_path = self._windows_base_path
@@ -41,10 +41,12 @@ class _PathSettings:
     # -------------------------
     def set_to_windows_paths(self):
         self.base_path = self._windows_base_path
+        self.ffmpeg_path = r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe"
         self._build_paths()
 
     def set_to_linux_paths(self):
         self.base_path = self._linux_base_path
+        self.ffmpeg_path = "ffmpeg"
         self._build_paths()
 
 

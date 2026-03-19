@@ -181,7 +181,6 @@ def extract_frames_from_video(input_video, output_dir, fps = 5):
         """
         Extracts frames from a video and puts the resulting frames in the output directory. replaces if frames already exist 
         """
-        FFMPEG_PATH = r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe"
         video_name = os.path.splitext(os.path.basename(input_video))[0]
         os.makedirs(output_dir, exist_ok=True)
 
@@ -190,7 +189,7 @@ def extract_frames_from_video(input_video, output_dir, fps = 5):
 
         # ffmpeg command
         cmd = [
-            FFMPEG_PATH,
+            paths_config.ffmpeg_path,
             "-y",
             "-i", input_video,
             "-vf", f"fps={fps}",
@@ -272,7 +271,7 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
             continue
         
         cmd = [
-            r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe",
+            paths_config.ffmpeg_path,
             "-y",  # overwrite if exists
             "-i", video_path,
             "-ac", "1",  # mono
@@ -349,8 +348,46 @@ def extract_audio_embeddings(audios_dir, embeddings_dir, log_file="./Logs_audio_
 
 #extract_audio_embeddings(audios_path, audio_embeddings_path)
 
+def extract_video_embedding(input_frame_dir, output_file, model=None, preprocess=None, device="cuda" if torch.cuda.is_available() else "cpu"):
 
-def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_embeddings_log_file,
+    if model is None or preprocess is None:
+        model, preprocess = clip.load("ViT-B/32", device=device)
+
+    if not output_file.endswith(".npy"): 
+        print(f"outfile {output_file} should have extension .npy")
+        return False    
+
+    frame_files = sorted([f for f in os.listdir(input_frame_dir) if f.endswith(".jpg")])
+    if len(frame_files) == 0:
+        print(f"⚠️ No frames found for {os.path.basename(output_file)}!")
+        return False
+
+    try:
+        all_embeddings = []
+        for f in frame_files:
+            img_path = os.path.join(input_frame_dir, f)
+            image = preprocess(Image.open(img_path).convert("RGB")).unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                emb = model.encode_image(image)
+                emb = emb / emb.norm(dim=-1, keepdim=True)  # normalize
+                all_embeddings.append(emb.cpu().numpy())
+
+        # Average embeddings
+        video_emb = np.mean(np.vstack(all_embeddings), axis=0)
+
+        # Save
+        np.save(output_file, video_emb)  #<TODO i wanted it to replace if the output already exists!
+        print(f"✅ Saved embedding for video {os.path.basename(input_frame_dir)} at {output_file}")
+        return True
+
+    except Exception as e:
+        print(f"⚠️ Failed to embed video frame folder {os.path.basename(input_frame_dir)}: {e}")
+        return False
+
+
+
+def vggsound_extract_video_embeddings_batch(frames_dir, video_embeddings_dir, log_file=video_embeddings_log_file,
                              device="cuda" if torch.cuda.is_available() else "cpu"):
     """
     Extracts video embeddings by averaging CLIP embeddings of frames.
@@ -364,13 +401,14 @@ def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_em
     """
 
     # Load CLIP model
+    print(f"Loading CLIP model on {device}...")
     model, preprocess = clip.load("ViT-B/32", device=device)
 
     # List all videos (subfolders)
     video_ids = [v for v in os.listdir(frames_dir) if os.path.isdir(os.path.join(frames_dir, v))]
-    print(f"Found {len(video_ids)} videos for embedding extraction.")
+    print(f"Found {len(video_ids)} frame folders (videos) for embedding extraction.")
 
-    for vid in video_ids:
+    for vid in video_ids: 
         out_file = os.path.join(video_embeddings_dir, f"{vid}.npy")
         
         # Skip if embedding already exists
@@ -379,37 +417,14 @@ def extract_video_embeddings(frames_dir, video_embeddings_dir, log_file=video_em
             continue
 
         frame_folder = os.path.join(frames_dir, vid)
-        frame_files = sorted([f for f in os.listdir(frame_folder) if f.endswith(".jpg")])
-        if len(frame_files) == 0:
-            print(f"⚠️ No frames found for {vid}, logging failure.")
+
+        success = extract_video_embedding(frame_folder,out_file, model,preprocess)
+
+        if not success:
             with open(log_file, mode='a', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow([vid, "failed_no_frames"])
-            continue
+                csv.writer(f).writerow([vid, "embedding_failed"])
 
-        try:
-            all_embeddings = []
-            for f in frame_files:
-                img_path = os.path.join(frame_folder, f)
-                image = preprocess(Image.open(img_path).convert("RGB")).unsqueeze(0).to(device)
-
-                with torch.no_grad():
-                    emb = model.encode_image(image)
-                    emb = emb / emb.norm(dim=-1, keepdim=True)  # normalize
-                    all_embeddings.append(emb.cpu().numpy())
-
-            # Average embeddings
-            video_emb = np.mean(np.vstack(all_embeddings), axis=0)
-
-            # Save
-            np.save(out_file, video_emb)
-            print(f"✅ Saved embedding for {vid} → {out_file}")
-
-        except Exception as e:
-            print(f"⚠️ Failed to embed video {vid}: {e}")
-            with open(log_file, mode='a', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow([vid, "failed_processing"])
+    print("... Batch embedding complete...")
 
 # extract_video_embeddings(video_frames_path, video_embeddings_path, video_embeddings_log_file)
 
@@ -603,17 +618,17 @@ def create_inference_example(inference_dict):
 
 
 
-# pprint.pprint(example1, sort_dicts=False)
-# pprint.pp(infer_similar_audio(query="-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3), sort_dicts=False)
-
-# create_inference_example(example1)
-
 
 if __name__ == "__main__":
     vids = ["--XInAaMS6k", "-0gYWIOfqdM", "-3M-k4nIYIM", "-4ItJ9yTz_c", "-4o0jRbgHr4", "-4rdRn-FRXo", "-6lkiUAf_cQ", "-6VFTlZsft4"]
    
-    for vid in vids:
-        print(",\n")
-        pprint.pp(infer_similar_audio(query= vid, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
-        print(",\n")
-   
+    # for vid in vids:
+    #     print(",\n")
+    #     pprint.pp(infer_similar_audio(query= vid, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
+    #     print(",\n")
+
+    # random video
+    # extract_frames_from_video("/home/hossein/Desktop/B.sc.-project/inferred_examples/-0gYWIOfqdM/-0gYWIOfqdM.mp4","/home/hossein/Desktop/randomclip", 5)
+    # extract_video_embedding("/home/hossein/Desktop/randomclip", "/home/hossein/Desktop/rando.npy")
+    pprint.pp(infer_similar_audio("/home/hossein/Desktop/rando.npy", 5, True,1, 0.01), sort_dicts=False)
+    pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
