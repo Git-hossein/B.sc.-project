@@ -618,6 +618,36 @@ def create_inference_example(inference_dict):
 
 
 
+def evaluate_inference(data_dict):
+    total_video = len(data_dict)
+    num_og_audio_found = 0
+    reciprocal_ranks = []
+
+    for vid, audios in data_dict.items():
+        rank = 0
+
+        # audios is already sorted → just iterate
+        for i, audio_name in enumerate(audios.keys(), start=1):
+            if audio_name == vid:
+                rank = i
+                break
+
+        if rank > 0:
+            num_og_audio_found += 1
+            reciprocal_ranks.append(1 / rank)
+        else:
+            reciprocal_ranks.append(0)
+
+    recall_at_k = num_og_audio_found / total_video
+    mrr = sum(reciprocal_ranks) / total_video
+
+    return {
+        "total number of query videos": total_video,
+        "recall_at_k": recall_at_k,
+        "mrr": mrr
+    }
+
+
 
 if __name__ == "__main__":
     vids = ["--XInAaMS6k", "-0gYWIOfqdM", "-3M-k4nIYIM", "-4ItJ9yTz_c", "-4o0jRbgHr4", "-4rdRn-FRXo", "-6lkiUAf_cQ", "-6VFTlZsft4"]
