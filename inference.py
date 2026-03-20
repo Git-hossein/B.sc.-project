@@ -618,34 +618,31 @@ def create_inference_example(inference_dict):
 
 
 
-def evaluate_inference(data_dict):
-    total_video = len(data_dict)
-    num_og_audio_found = 0
-    reciprocal_ranks = []
+def evaluate_inference(data_dict, k_values=[1, 5, 10]):
+    total_videos = len(data_dict)
+    ranks = []
 
     for vid, audios in data_dict.items():
-        rank = 0
+        audio_ids = list(audios.keys())
+        try:
+            rank = audio_ids.index(vid) + 1
+            ranks.append(rank)
+        except ValueError:
+            ranks.append(float('inf'))
 
-        # audios is already sorted → just iterate
-        for i, audio_name in enumerate(audios.keys(), start=1):
-            if audio_name == vid:
-                rank = i
-                break
+    results = {"Total Videos": total_videos}
 
-        if rank > 0:
-            num_og_audio_found += 1
-            reciprocal_ranks.append(1 / rank)
-        else:
-            reciprocal_ranks.append(0)
+    # Calculate Recall for whatever K values you want
+    for k in k_values:
+        # If the user only retrieved 3 audios, R@5 will just be the same as R@3
+        recall = sum(1 for r in ranks if r <= k) / total_videos
+        results[f"Recall@{k}"] = f"{recall:.2%}"
 
-    recall_at_k = num_og_audio_found / total_video
-    mrr = sum(reciprocal_ranks) / total_video
+    # MRR (Mean Reciprocal Rank)
+    mrr = sum(1/r if r != float('inf') else 0 for r in ranks) / total_videos
+    results["MRR"] = round(mrr, 4)
 
-    return {
-        "total number of query videos": total_video,
-        "recall_at_k": recall_at_k,
-        "mrr": mrr
-    }
+    return results
 
 
 
