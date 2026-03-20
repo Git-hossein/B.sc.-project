@@ -192,7 +192,7 @@ def extract_frames_from_video(input_video, output_dir, fps = 5):
             paths_config.ffmpeg_path,
             "-y",
             "-i", input_video,
-            "-vf", f"fps={fps}",
+            "-vf", f"fps={fps}:round=up",
             output_pattern,
             "-hide_banner",
             "-loglevel", "error"  # suppress ffmpeg spam
