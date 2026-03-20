@@ -5,9 +5,12 @@ import time
 from path_settings import paths_config
 
 
+paths_config.set_to_linux_paths()
 
 def prepare_batch_for_server(inferred_dict):
     # 1. Save the JSON
+    
+    os.makedirs(paths_config._TCML_server_input, exist_ok=True)
     json_path = os.path.join(paths_config._TCML_server_input, "inferred.json")
     with open(json_path, 'w') as f:
         json.dump(inferred_dict, f, indent=4)
@@ -24,10 +27,10 @@ def prepare_batch_for_server(inferred_dict):
         # else:
         #     raise Exception(f"path {target_video_path} doesn't exist for video id {target_video_id}")
     
-        for segment_file in matches.keys():
+        for audio_emb in matches.keys():
 
-            target_audio_id = os.path.splitext(segment_file)[0]
-            target_audio_path = os.path.join(paths_config.audios_path ,f"{target_audio_id}.mp4")
+            target_audio_id = os.path.splitext(audio_emb)[0]
+            target_audio_path = os.path.join(paths_config.audios_path ,f"{target_audio_id}.wav")
             if os.path.exists(target_audio_path):
                 upload_set.add(target_audio_path)
             else:
@@ -118,7 +121,7 @@ def upload_to_tcml(json_path: str, upload_set: set[str])->bool:
 
 def trigger_sbatch_remote():
     remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
-    sbatch_command = "sbatch /home/sherkat/generate_audio.sbatch"
+    sbatch_command = "sbatch --parsable /home/sherkat/generate_audio.sbatch"
 
     print("...Submitting job to Slurm...")
     cmd = ["ssh", remote_host, sbatch_command]
@@ -163,6 +166,7 @@ def download_results(local_dest, inferred_dict = None):
     remote_dir = "~/audio_outputs"
     remote_source = f"{remote_host}:{remote_dir}/"
 
+    os.makedirs(local_dest, exist_ok=True)
     if inferred_dict is not None:
         original_count = len(inferred_dict)
 
@@ -194,10 +198,104 @@ def run_tcml_audio_pipeline(data_dict):
 
 
     json_path, file_set = prepare_batch_for_server(data_dict)
-    success = upload_to_tcml(json_path, file_set)
 
+    print("prepare_batch_for_server done")
+    success = upload_to_tcml(json_path, file_set)
+    print("upload_to_tcml done")
     if success:
         job_id = trigger_sbatch_remote()
         complete = wait_for_job_completion(job_id)
         if complete:
             download_results(paths_config._TCML_server_output_generated, data_dict)
+
+
+
+
+results = {
+            '--XInAaMS6k.npy': {'-C6cbmMaENE.npy': 0.6466576988106167,
+                        '-8KFpJHyspw.npy': 0.14904139426690938,
+                        '-03N_1zOM4E.npy': 0.10659110957951061,
+                        '-KQ7U3gS1wQ.npy': 0.05174921559957428,
+                        '-HWoFxKmyyo.npy': 0.04596058174338897}
+    ,
+
+
+
+    '-0gYWIOfqdM.npy': {'-0gYWIOfqdM.npy': 0.6202382082358212,
+                        '-4yCSY_5Zns.npy': 0.31029253698116976,
+                        '-D7Od7iYq0A.npy': 0.04162212451171154,
+                        '-A-xb-P-WxQ.npy': 0.02028793443981568,
+                        '-HtBJbsbeHo.npy': 0.0075591958314815974}
+    ,
+
+
+
+    '-3M-k4nIYIM.npy': {'-9whJW7BUSU.npy': 0.3196014880596852,
+                        '-HxQ9AoyRmY.npy': 0.24735819844202067,
+                        '-60vY5Xw1qE.npy': 0.15602753270196487,
+                        '-9vw5ZzChT0.npy': 0.14684911321636024,
+                        '-3MNphBfq_0.npy': 0.13016366757996897}
+    ,
+
+
+
+    '-4ItJ9yTz_c.npy': {'-AioliAg12U.npy': 0.5865218525077042,
+                        '-NPu34as_OY.npy': 0.18724029723388622,
+                        '-6ZEGCtBKqs.npy': 0.10033209712998142,
+                        '-Gbohom8C4Q.npy': 0.08084076879787816,
+                        '-62pV95k9O0.npy': 0.045064984330550145}
+    ,
+
+
+
+    '-4o0jRbgHr4.npy': {'-NPu34as_OY.npy': 0.7716207865103134,
+                        '-CexapzRAPQ.npy': 0.1304685089335117,
+                        '-4o0jRbgHr4.npy': 0.05299553586319041,
+                        '-9wRxzJ5j_Y.npy': 0.022736311823520462,
+                        '-C8JU6yTJ40.npy': 0.022178856869464036}
+    ,
+
+
+
+    '-4rdRn-FRXo.npy': {'-Kc9P729mqM.npy': 0.36042281765518974,
+                        '-7XYw1VrN64.npy': 0.33141335961690443,
+                        '-MNP_aM09S8.npy': 0.1580765973593134,
+                        '-CCbu3r-1pc.npy': 0.0915348425868341,
+                        '-JdUSVmQq88.npy': 0.058552382781758214}
+    ,
+
+
+
+    '-6lkiUAf_cQ.npy': {'-6lkiUAf_cQ.npy': 0.7625829829950478,
+                        '-ECRgvDx4xc.npy': 0.11362292998877925,
+                        '-3xhrOw45ss.npy': 0.0643086250163537,
+                        '-2JomCd5zzY.npy': 0.038541489457014064,
+                        '-FfFD4bbCEI.npy': 0.020943972542805226}
+    ,
+
+
+
+    '-6VFTlZsft4.npy': {'-AltV1ftMk8.npy': 0.31224017893390565,
+                        '-EWyYYBHsbQ.npy': 0.2170137781686798,
+                        '-CcGuq0yoKo.npy': 0.20042663093106244,
+                        '-0NxpZlO348.npy': 0.18478375634990274,
+                        '-1EeNriiRN0.npy': 0.08553565561644937}
+
+    }
+
+
+
+results2 = {'-3suCV1UqMc.npy': {'-3SE2nOj6d4.npy': 0.5483170078614558,
+                     '-LbwHG1fr3Q.npy': 0.23239105781365485,
+                     '-9RkREsqm1o.npy': 0.21929193432488933},
+ '-3GsMfOpuRM.npy': {'-LrNmB50-nA.npy': 0.5451024700459897,
+                     '-9hqBiuwp2Y.npy': 0.2663383156605519,
+                     '--bvmgIdDC8.npy': 0.18855921429345837},
+ '-4eXuXHZw_A.npy': {'-7hQNEhU6Vk.npy': 0.998502996945732,
+                     '-LLWKg5fHJs.npy': 0.0007533287131479051,
+                     '-Hw2mdbqXZc.npy': 0.0007436743411202587},
+ '-3L1rzGAD_o.npy': {'-E1zyCQE3es.npy': 0.6240114992250659,
+                     '-39sHTky_6o.npy': 0.19476032674939506,
+                     '-4ELUORuKtk.npy': 0.18122817402553895}}
+
+run_tcml_audio_pipeline(results2)
