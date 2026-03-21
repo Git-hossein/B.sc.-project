@@ -260,6 +260,88 @@ def vggsound_batch_extract_frames_from_vids(trimmed_videos_dir, frames_dir, fps=
 
 #extract_frames_from_videos(trimmed_videos_path, video_frames_path, fps=5)
 
+
+
+def check_single_file(vid_path):
+    """Worker function to check one file."""
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(vid_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return vid_path.name
+    except Exception:
+        return vid_path.name
+    return None
+
+def check_integrity(full_dir=full_videos_path, trimmed_dir=trimmed_videos_path):
+    print("🚀 Starting the integrity check...")
+    full_path = Path(full_dir)
+    trimmed_path = Path(trimmed_dir)
+
+    valid_full = {}
+    valid_trimmed = {}
+    invalid_naming_full = []
+    invalid_naming_trimmed = []
+
+    # --- 1. SCAN FOLDERS (This part is very fast) ---
+    for f in full_path.iterdir():
+        if f.is_file():
+            if f.name.endswith('_full.mp4'):
+                valid_full[f.name.replace('_full.mp4', '')] = f
+            else:
+                invalid_naming_full.append(f.name)
+
+    for f in trimmed_path.iterdir():
+        if f.is_file():
+            if f.name.endswith('.mp4') and not f.name.endswith('_full.mp4'):
+                valid_trimmed[f.name.replace('.mp4', '')] = f
+            else:
+                invalid_naming_trimmed.append(f.name)
+
+    # --- 2. PRINT SYNC REPORT ---
+    full_ids = set(valid_full.keys())
+    trimmed_ids = set(valid_trimmed.keys())
+    missing_from_trimmed = full_ids - trimmed_ids
+    missing_from_full = trimmed_ids - full_ids
+
+    print("\n" + "="*50)
+    print(f"📊 DATASET SYNC: Full Folder ({len(full_ids)}) | Trimmed Folder ({len(trimmed_ids)})")
+    print("="*50)
+
+    if missing_from_trimmed:
+        print(f"⚠️  MISSING IN TRIMMED ({len(missing_from_trimmed)} IDs)")
+    if missing_from_full:
+        print(f"⚠️  MISSING IN FULL ({len(missing_from_full)} IDs)")
+
+    if invalid_naming_full or invalid_naming_trimmed:
+        print(f"🚫 INVALID NAMES: Full ({len(invalid_naming_full)}) | Trimmed ({len(invalid_naming_trimmed)})")
+
+    # --- 3. THE TURBO HEALTH CHECK (ffprobe) ---
+    print("\n" + "-"*50)
+    print("🛠️  CORRUPTION CHECK (Parallel ffprobe)")
+    print("-" * 50)
+    
+    all_files = list(valid_full.values()) + list(valid_trimmed.values())
+    total_files = len(all_files)
+    corrupted = []
+    
+    print(f"Checking {total_files} files using 16 CPU threads...")
+
+    # We use 16 workers to check 16 files at once
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        # We wrap the results in a list to wait for them to finish
+        results = list(executor.map(check_single_file, all_files))
+        
+    # Filter out the None results (healthy files) to get the corrupted names
+    corrupted = [name for name in results if name is not None]
+
+    if corrupted:
+        print(f"❌ Found {len(corrupted)} unreadable files!")
+        for c in corrupted:
+            print(f"   - {c}")
+    else:
+        print("✅ All video headers are healthy.")
+
 def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000, log_file=extract_audio_log_file):
     """
     Extracts audio from trimmed videos as .wav files (mono, resampled to sample_rate)
@@ -676,3 +758,4 @@ if __name__ == "__main__":
    
     # videos_training = vggsound_training_videos_generator("vggsound.csv", 120, 2999)
     # vggsound_batch_down_trim(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
+    # check_integrity()
