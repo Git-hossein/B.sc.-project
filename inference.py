@@ -1,4 +1,5 @@
 from path_settings import paths_config
+from pathlib import Path
 import os
 import csv
 import yt_dlp
@@ -14,9 +15,10 @@ import random
 import pprint
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor  # <-- New tool
 
 # Base dataset path
-paths_config.set_to_linux_paths()
+paths_config.set_to_windows_paths()
 
 # Create separate folders for full and trimmed clips
 full_videos_path = paths_config.full_videos_path
@@ -87,18 +89,28 @@ def vggsound_training_videos_generator(vggsound_path, nmany=1033, start=0):
 
             
 
-videos_training = vggsound_training_videos_generator("vggsound.csv", 1033, 0) # last called with ("vggsound.csv", 2000 - 779, 779) and stoped at when i had 1026 trimmed files
+# videos_training = vggsound_training_videos_generator("vggsound.csv", 1033, 0) # last called with ("vggsound.csv", 2000 - 779, 779) and stoped at when i had 1026 trimmed files
 
 
 def download_youtube_video(video_id, output_path):
     """Downloads a single video if it doesn't exist."""
     if not os.path.exists(output_path):
-        print(f"Downloading full video {video_id}...")
-        ydl_opts = {'format': 'mp4', 'outtmpl': output_path, 'cookiefile': 'cookies.txt'}
+        print(f"⬇️ Downloading full video {video_id}...")
+        ydl_opts = {
+            'format': 'mp4',
+            'outtmpl': output_path,
+            'cookiesfrombrowser': ('firefox',),
+            'retries': 10,
+            
+            # --- ADD THESE FOR THE 1,000 VIDEO BATCH ---
+            'fragment_retries': 10,      # If a single chunk of video drops, it retries that chunk
+            'continuedl': True,          # If internet cuts, it picks up where it left off
+            'quiet': False,              # Keeps you informed of progress
+        }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-            print(f"Downloaded full video {video_id} successfully.")
+            print(f"✅ Downloaded full video {video_id} successfully.")
             return True
         except Exception as e:
             print(f"Failed to download {video_id}: {e}")
@@ -115,6 +127,7 @@ def trim_video(input_path, output_path, start_sec, duration = 10):
         return True
     
     try:
+        print(f"✂️ trimming video {os.path.basename(input_path)}...")
         subprocess.run([
                     "ffmpeg", "-y",
                     "-ss", str(start_sec),     # Fast seek to the start time
@@ -126,7 +139,7 @@ def trim_video(input_path, output_path, start_sec, duration = 10):
                     "-c:a", "aac",             # Use AAC audio codec
                     output_path
                 ], check=True, capture_output=True)
-        print(f"trimmed full video {os.path.basename(input_path)} successfully.")
+        print(f"🟢 trimmed full video {os.path.basename(input_path)} successfully.")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Failed to trim {os.path.basename(input_path)} : {e}")
@@ -160,6 +173,7 @@ def vggsound_batch_down_trim(video_list, full_videos_path, trimmed_videos_path, 
         trim_success = False
 
         # Download full video
+        print("start downloading and trimming video ")
         dl_success = download_youtube_video(video_id, full_file)
 
         # Trim video
@@ -630,13 +644,13 @@ def evaluate_inference(data_dict, k_values=[1, 5, 10]):
         except ValueError:
             ranks.append(float('inf'))
 
-    results = {"Total Videos": total_videos}
+    results = {"Total Videos": float(total_videos)}
 
     # Calculate Recall for whatever K values you want
     for k in k_values:
         # If the user only retrieved 3 audios, R@5 will just be the same as R@3
         recall = sum(1 for r in ranks if r <= k) / total_videos
-        results[f"Recall@{k}"] = f"{recall:.2%}"
+        results[f"Recall@{k}"] = round(recall, 4)
 
     # MRR (Mean Reciprocal Rank)
     mrr = sum(1/r if r != float('inf') else 0 for r in ranks) / total_videos
@@ -657,5 +671,8 @@ if __name__ == "__main__":
     # random video
     # extract_frames_from_video("/home/hossein/Desktop/B.sc.-project/inferred_examples/-0gYWIOfqdM/-0gYWIOfqdM.mp4","/home/hossein/Desktop/randomclip", 5)
     # extract_video_embedding("/home/hossein/Desktop/randomclip", "/home/hossein/Desktop/rando.npy")
-    pprint.pp(infer_similar_audio("/home/hossein/Desktop/rando.npy", 5, True,1, 0.01), sort_dicts=False)
-    pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
+    # pprint.pp(infer_similar_audio("/home/hossein/Desktop/rando.npy", 5, True,1, 0.01), sort_dicts=False)
+    # pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
+   
+    # videos_training = vggsound_training_videos_generator("vggsound.csv", 120, 2999)
+    # vggsound_batch_down_trim(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
