@@ -553,6 +553,60 @@ def softmax(scores, T = 1.0):
     return (exponentials / np.sum(exponentials)).tolist()
 
 
+def load_all_normed_embeddings(embeddings_dir):
+    files = [f for f in os.listdir(embeddings_dir) if f.endswith(".npy")]
+    all_embs = []
+    filenames = []
+    
+    for f in files:
+        emb = np.load(os.path.join(embeddings_dir, f)).squeeze()
+        # Pre-normalize for faster cosine similarity later
+        norm = np.linalg.norm(emb)
+        all_embs.append(emb / (norm if norm > 0 else 1e-9))
+        filenames.append(f)
+        
+    return np.array(all_embs), filenames
+
+def find_top_k_similar_fast(
+        query_emb: np.ndarray, 
+        all_emb_files_tuple: tuple[np.ndarray, list[str]] | None = None, 
+        embeddings_dir: str = audio_embeddings_path, 
+        k: int = 5, 
+        T:float = 1.0):
+
+    if all_emb_files_tuple is None:
+        print("Embeddings is None. Loading audio embeddings manuelly...")
+        ALL_AUDIO_EMBS, AUDIO_FILENAMES = load_all_normed_embeddings(embeddings_dir)
+    else:
+        ALL_AUDIO_EMBS, AUDIO_FILENAMES = all_emb_files_tuple
+
+    # Normalize query once
+    query_norm = query_emb / np.linalg.norm(query_emb)
+    
+    # SINGLE MATRIX OPERATION: This replaces your entire loop
+    # (N, D) dot (D,) -> (N,) similarities
+    similarities = np.dot(ALL_AUDIO_EMBS, query_norm)
+    
+    # Use argpartition to find top K indices (faster than sorting everything)
+    if k >= len(similarities) * 0.2:
+        top_indices = np.argsort(similarities)[::-1]
+    else:
+        # Gets indices of k largest elements (not necessarily sorted)
+        idx = np.argpartition(similarities, -k)[-k:]
+        # Sort only those k elements
+        top_indices = idx[np.argsort(similarities[idx])][::-1]
+    
+    top_scores = similarities[top_indices]
+    top_files = [AUDIO_FILENAMES[i] for i in top_indices]
+    
+    # Softmax on just the top K
+    scores_shifted = top_scores / T
+    exps = np.exp(scores_shifted - np.max(scores_shifted))
+    softmax_probs = (exps / np.sum(exps)).tolist()
+    
+    return list(zip(top_files, softmax_probs))
+
+
 
 def find_top_k_similar(query_emb: np.ndarray, embeddings_dir: str, k: int = 5, T: float = 1.0):
     """
@@ -673,6 +727,90 @@ def infer_similar_audio(query=None, top_k=5,
 
     return results
 
+
+
+
+
+def infer_similar_audio_fast(
+        query=None, 
+        all_emb_files_tuple: tuple[np.ndarray, list[str]] | None = None , 
+        top_k=5, 
+        single_mode=True, 
+        random_sample_count=1, temp:float = 1.0
+        ):
+    """
+    Retrieve top-k most similar audio embeddings for given video embeddings efficiently using matrix multiplication. 
+    If the query is the full path to a video embedding, it will be used directly. If the query is a YouTube ID, 
+    it will be assumed that its embedding is stored as "query.npy" in the `video_embeddings_path` folder.
+
+    Args:
+        query (str or str path): Either YouTube ID (without .npy) or full path to video embedding.
+                                 Only used in single_mode.
+        embedding_file_pairs(tuple(np.array , list(str))): a tuple of all the np embeddings and their corresponding file names
+        top_k (int): Number of top similar audios to return.
+        single_mode (bool): If True, use a single video embedding; 
+                            if False, randomly sample multiple videos.
+        random_sample_count (int): Number of random videos to sample in random-sample mode.
+        T (int): Temperature param. used by softmax for inference
+
+    Returns:
+        dict: 
+            {
+                query_embedding_name: {
+                    audio_filename1: similarity_score1,
+                    audio_filename2: similarity_score2,
+                    ...
+                },
+                ...
+            }
+    """
+    results = {}
+    audio_embeddings_dir = audio_embeddings_path  # fixed path from your base_path
+    video_embeddings_dir = video_embeddings_path
+    if all_emb_files_tuple is None:
+        print("Embeddings is None. Loading audio embeddings manuelly...")
+        all_emb_files_tuple = load_all_normed_embeddings(audio_embeddings_path)
+
+
+    # Helper to load embedding given path or ID
+    def load_embedding(query):
+        if os.path.exists(query):  # full path
+            return np.load(query), os.path.basename(query)
+        else:  # assume query is YouTube ID
+            emb_path = os.path.join(video_embeddings_dir, f"{query}.npy")
+            if not os.path.exists(emb_path):
+                raise FileNotFoundError(f"Video embedding not found for ID {query}")
+            return np.load(emb_path), f"{query}.npy"
+
+    # --- SINGLE MODE ---
+    if single_mode:
+        if query is None:
+            raise ValueError("In single_mode, `query` must be provided (ID or path).")
+        
+        video_emb, key_name = load_embedding(query)
+        top_similar = find_top_k_similar_fast(video_emb, all_emb_files_tuple, k=top_k, T = temp)
+        # convert to dict {filename: similarity}
+        results[key_name] = {fname: score for fname, score in top_similar}
+
+    # --- RANDOM SAMPLE MODE ---
+    else:
+        # List all video embeddings
+        all_video_files = [f for f in os.listdir(video_embeddings_dir) if f.endswith(".npy")]
+        if len(all_video_files) == 0:
+            raise FileNotFoundError("No video embeddings found in the directory.")
+        if random_sample_count > len(all_video_files):
+            random_sample_count = len(all_video_files)
+        
+        sampled_videos = random.sample(all_video_files, random_sample_count)
+        
+        for vid_file in sampled_videos:
+            vid_path = os.path.join(video_embeddings_dir, vid_file)
+            video_emb = np.load(vid_path)
+            top_similar = find_top_k_similar_fast(video_emb, all_emb_files_tuple, k=top_k, T = temp)
+            results[vid_file] = {fname: score for fname, score in top_similar}
+
+    return results
+
 example1 = infer_similar_audio(query="--PlJNEnf-s", top_k=5, single_mode=True, random_sample_count=3)
 
 
@@ -769,3 +907,6 @@ if __name__ == "__main__":
     # videos_training = vggsound_training_videos_generator("vggsound.csv", 120, 2999)
     # vggsound_batch_down_trim(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
     # check_integrity()
+    ALL_EMBS_FILES_TUPLE = load_all_normed_embeddings(audio_embeddings_path)
+    pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
+    pprint.pp(infer_similar_audio_fast(query= "-0gYWIOfqdM", all_emb_files_tuple= ALL_EMBS_FILES_TUPLE, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
