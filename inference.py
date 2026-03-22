@@ -236,6 +236,11 @@ def vggsound_batch_extract_frames_from_vids(trimmed_videos_dir, frames_dir, fps=
     os.makedirs(frames_dir, exist_ok=True)
     success_overall = True
 
+    print("======== begin batch frame extraction ========")
+
+    videos = [f for f in os.listdir(trimmed_videos_dir) if f.endswith(".mp4")]
+    print(f"Found {len(videos)} trimmed videos")
+
     for video in os.listdir(trimmed_videos_dir):
         if not video.endswith(".mp4"):
             print(f"skipping {video}: non mp4 file...")
@@ -354,10 +359,15 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
         log_file (str): CSV file to log failures.
     """
     
+    print("======== begin batch audio extraction ========")
+
     videos = [f for f in os.listdir(trimmed_videos_dir) if f.endswith(".mp4")]
-    print(f"Found {len(videos)} trimmed videos for audio extraction.")
-    
-    for video in videos:
+    print(f"Found {len(videos)} trimmed videos")
+
+    for video in os.listdir(trimmed_videos_dir):
+        if not video.endswith(".mp4"):
+            print(f"skipping {video}: non mp4 file")
+            continue
         video_path = os.path.join(trimmed_videos_dir, video)
         video_id = os.path.splitext(video)[0]
         audio_file = os.path.join(audios_dir, f"{video_id}.wav")
@@ -379,7 +389,7 @@ def extract_audio_from_videos(trimmed_videos_dir, audios_dir, sample_rate=16000,
         
         try:
             subprocess.run(cmd, check=True)
-            print(f"Extracted audio for {video_id} successfully.")
+            print(f"Extracted audio for {video_id} successfully ✔✔")
         except subprocess.CalledProcessError as e:
             print(f"⚠️ Failed to extract audio for {video_id}: {e}")
             # Log failure
