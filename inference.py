@@ -63,7 +63,7 @@ if not os.path.exists(video_embeddings_log_file):
         writer = csv.writer(f)
         writer.writerow(["video_id", "embed_status"])
 
-def vggsound_training_videos_generator(vggsound_path, nmany=1033, start=0):
+def vggsound_training_videos_generator(vggsound_path, nmany=1033, start=0, type: Literal["train", "test"] = "train") -> Iterator[tuple[str, int, str]]:
     """
     Yields (video_id, start_sec, label) for 'train' rows.
     Skips the first `start` training rows before yielding.
@@ -74,7 +74,7 @@ def vggsound_training_videos_generator(vggsound_path, nmany=1033, start=0):
         skipped = 0
         yielded = 0
         for row in reader:
-            if row[3].strip() != "train":
+            if row[3].strip() != type:
                 continue  # skip non-training rows
 
             # Skip first `start` items
