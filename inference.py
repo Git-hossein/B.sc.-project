@@ -555,7 +555,7 @@ def softmax(scores, T = 1.0):
 
 
 def load_all_normed_embeddings(embeddings_dir):
-    files = [f for f in os.listdir(embeddings_dir) if f.endswith(".npy")]
+    files = sorted([f for f in os.listdir(embeddings_dir) if f.endswith(".npy")])
     all_embs = []
     filenames = []
     
