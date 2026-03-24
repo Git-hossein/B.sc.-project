@@ -5,7 +5,6 @@ import time
 from path_settings import paths_config
 
 
-paths_config.set_to_linux_paths()
 
 def prepare_batch_for_server(inferred_dict):
     # 1. Save the JSON
