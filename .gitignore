@@ -6,3 +6,6 @@ testingRightNow.py
 env/
 tcml_exchange/
 .vscode/
+sbatch.sbatch
+FirstRun/
+SecondRun/
