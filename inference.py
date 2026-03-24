@@ -18,8 +18,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from typing import Iterator, Literal
 
-# Base dataset path
-paths_config.set_to_windows_paths()
+
 
 # Create separate folders for full and trimmed clips
 full_videos_path = paths_config.full_videos_path
