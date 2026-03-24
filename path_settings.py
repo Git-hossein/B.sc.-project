@@ -35,6 +35,7 @@ class _PathSettings:
         self.extract_audio_log_file = "./Logs_extract_audio.csv"
         self.embeddings_audio_log_file = "./Logs_audio_embeddings.csv"
         self.video_embeddings_log_file = "./Logs_video_embeddings.csv"
+        self.vggsound_path = "./vggsound.csv"
 
     # -------------------------
     # public switch methods
