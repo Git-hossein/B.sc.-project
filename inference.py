@@ -816,13 +816,147 @@ example1 = infer_similar_audio(query="--PlJNEnf-s", top_k=5, single_mode=True, r
 
 
 
-def create_inference_example(inference_dict):
+
+
+def find_top_k_similar_ultra_fast(
+        query_embs: np.ndarray, 
+        all_emb_files_tuple: tuple[np.ndarray, list[str]] | None = None, 
+        embeddings_dir: str = "path/to/embeddings", 
+        k: int = 5, 
+        T: float = 1.0):
+
+    # 1. Fallback Loading Logic
+    if all_emb_files_tuple is None:
+        ALL_AUDIO_EMBS, AUDIO_FILENAMES = load_all_normed_embeddings(embeddings_dir)
+    else:
+        ALL_AUDIO_EMBS, AUDIO_FILENAMES = all_emb_files_tuple
+
+    # 2. Ensure query is 2D (Matrix)
+    # If a single query is passed (1D), convert it to (1, D)
+    if query_embs.ndim == 1:
+        query_embs = query_embs[np.newaxis, :]
+
+    # 3. Vectorized Normalization (per row)
+    q_norms = np.linalg.norm(query_embs, axis=1, keepdims=True)
+    query_ready = query_embs / (q_norms + 1e-9)
+    
+    # 4. BATCH MATRIX OPERATION
+    # (Q, D) @ (D, N) -> (Q, N) Matrix of all similarities
+    all_similarities = query_ready @ ALL_AUDIO_EMBS.T
+    
+    # 5. Process results for each query
+    batch_results = []
+    num_queries = all_similarities.shape[0]
+    num_docs = all_similarities.shape[1]
+    
+    # Use a loop for the Top-K/Softmax part (this is O(Q), which is very fast)
+    # The heavy lifting O(Q*N) was already done in the matrix multiplication above.
+    for i in range(num_queries):
+        similarities = all_similarities[i]
+        
+        # Top K Logic
+        current_k = min(k, num_docs)
+        if current_k >= num_docs * 0.2:
+            top_indices = np.argsort(similarities)[::-1][:current_k]
+        else:
+            idx = np.argpartition(similarities, -current_k)[-current_k:]
+            top_indices = idx[np.argsort(similarities[idx])][::-1]
+        
+        top_scores = similarities[top_indices]
+        top_files = [AUDIO_FILENAMES[j] for j in top_indices]
+        
+        # Softmax on top K
+        scores_shifted = top_scores / T
+        exps = np.exp(scores_shifted - np.max(scores_shifted))
+        softmax_probs = (exps / np.sum(exps)).tolist()
+        
+        batch_results.append(list(zip(top_files, softmax_probs)))
+    
+    # Return a single list if only one query was provided, else the whole batch
+    return batch_results
+
+
+def infer_similar_audio_ultra_fast(
+        query_lst: list[str] | None = None, 
+        all_emb_files_tuple: tuple[np.ndarray, list[str]] | None = None, 
+        top_k: int = 5, 
+        random_sample: bool = False, 
+        random_sample_count: int = 1, 
+        temp: float = 1.0
+    ):
+    
+    video_embeddings_dir = video_embeddings_path
+    
+    # 1. Ensure we have the audio embeddings loaded
+    if all_emb_files_tuple is None:
+        print("Embeddings is None. Loading audio embeddings manually...")
+        all_emb_files_tuple = load_all_normed_embeddings(audio_embeddings_path)
+
+    query_matrix = []
+    final_keys = []
+
+    # --- MODE A: SPECIFIC QUERIES ---
+    if not random_sample:
+        if not query_lst:
+            raise ValueError("query_lst must be provided when random_sample is False.")
+        
+        for q in query_lst:
+            # Handle full path vs ID
+            path = q if os.path.exists(q) else os.path.join(video_embeddings_dir, f"{q}.npy")
+            if not os.path.exists(path):
+                print(f"Warning: Skipping {q}, file not found.")
+                continue
+            
+            emb = np.load(path).squeeze()
+            query_matrix.append(emb)
+            final_keys.append(os.path.basename(path))
+
+    # --- MODE B: RANDOM SAMPLES ---
+    else:
+        all_video_files = [f for f in os.listdir(video_embeddings_dir) if f.endswith(".npy")]
+        if not all_video_files:
+            raise FileNotFoundError("No video embeddings found.")
+        
+        count = min(random_sample_count, len(all_video_files))
+        final_keys = random.sample(all_video_files, count)
+        
+        for name in final_keys:
+            emb = np.load(os.path.join(video_embeddings_dir, name)).squeeze()
+            query_matrix.append(emb)
+
+    if not query_matrix:
+        return {}
+
+    # 2. Convert to 2D Matrix (N, Dimension)
+    query_matrix = np.array(query_matrix)
+
+    # 3. Use the Batch Search Function
+    # NOTE: Ensure your find_top_k_similar_fast handles 2D input as discussed
+    top_similars_batch = find_top_k_similar_ultra_fast(
+        query_matrix, 
+        all_emb_files_tuple, 
+        k=top_k, 
+        T=temp
+    )
+
+    # 5. Build Result Dictionary
+    results = {
+        key: {fname: float(score) for fname, score in similars}
+        for key, similars in zip(final_keys, top_similars_batch)
+    }
+
+    return results
+
+
+
+
+def create_inference_example(inference_dict, inference_dir = inferred_example_path):
     """
-    Given a dictionary returned by `infer_similar_audio`, create a folder structure
+    Given a dictionary returned by `infer_similar_audio` and destination directory, creates a folder structure
     with trimmed videos and matched audio files for easy viewing.
 
     Folder structure:
-    inferred_example_path/
+    inference_dir/
         query_video_name/
             query_video_name.mp4
             matched_audio1.wav
@@ -831,11 +965,12 @@ def create_inference_example(inference_dict):
 
     Args:
         inference_dict (dict): output of `infer_similar_audio`
+        inference_dir (str): path to create inference examples in
     """
     for video_key, audio_matches in inference_dict.items():
         # Remove .npy from video key to get folder/video name
         video_name = os.path.splitext(video_key)[0]
-        video_folder = os.path.join(inferred_example_path, video_name)
+        video_folder = os.path.join(inference_dir, video_name)
 
         # Create or replace folder
         if os.path.exists(video_folder):
@@ -859,7 +994,7 @@ def create_inference_example(inference_dict):
             else:
                 print(f"⚠️ Audio file {audio_name} not found for {video_name}, skipping.")
 
-    print(f"☑️ Inference examples created in {inferred_example_path}")
+    print(f"☑️ Inference examples created in {inference_dir}")
 
 
 
