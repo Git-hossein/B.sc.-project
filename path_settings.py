@@ -1,4 +1,5 @@
 import os
+import platform
 
 class _PathSettings:
     def __init__(self):
@@ -52,3 +53,8 @@ class _PathSettings:
 
 
 paths_config = _PathSettings()
+
+if platform.system() == "Windows":
+    paths_config.set_to_windows_paths()
+else:
+    paths_config.set_to_linux_paths()
