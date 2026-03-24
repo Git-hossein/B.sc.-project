@@ -3,19 +3,20 @@ import platform
 
 class _PathSettings:
     def __init__(self):
-        # Define both base paths
+
         self._windows_base_path = r"D:\Bsc.Thesis_Datasets\vggsound"
         self._linux_base_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound"
-
-        # Define other base paths
         self._TCML_server_base_path = "./tcml_exchange"
-        self.ffmpeg_path = ""
 
-        # Default system (you can change this)
-        self.base_path = self._windows_base_path
+        if platform.system() == "Windows":
+            self.base_path = self._windows_base_path
+            self.ffmpeg_path = r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe"
+        else:
+            self.base_path = self._linux_base_path
+            self.ffmpeg_path = "ffmpeg"
 
         # build paths initially
-        self.set_to_windows_paths()
+        self._build_paths()
 
     # -------------------------
     # internal helper
@@ -38,23 +39,6 @@ class _PathSettings:
         self.video_embeddings_log_file = "./Logs_video_embeddings.csv"
         self.vggsound_path = "./vggsound.csv"
 
-    # -------------------------
-    # public switch methods
-    # -------------------------
-    def set_to_windows_paths(self):
-        self.base_path = self._windows_base_path
-        self.ffmpeg_path = r"C:\Users\hosse\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe"
-        self._build_paths()
-
-    def set_to_linux_paths(self):
-        self.base_path = self._linux_base_path
-        self.ffmpeg_path = "ffmpeg"
-        self._build_paths()
 
 
 paths_config = _PathSettings()
-
-if platform.system() == "Windows":
-    paths_config.set_to_windows_paths()
-else:
-    paths_config.set_to_linux_paths()
