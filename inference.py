@@ -645,6 +645,67 @@ def create_inference_example(inference_dict, inference_dir = inferred_example_pa
 
 
 
+
+
+def create_inference_example_ultimate(inference_dict, inference_dir = inferred_example_path, query_videos_dir = trimmed_videos_path):
+    """
+    Given a dictionary returned by `infer_similar_audio` and destination directory, creates a folder structure
+    with trimmed videos and matched audio files for easy viewing.
+
+    Folder structure:
+    inference_dir/
+        query_video_name/
+            query_video_name.mp4
+            matched_audio1.wav
+            matched_audio2.wav
+            ...
+
+    Args:
+        inference_dict (dict): output of `infer_similar_audio`
+        inference_dir (str): path to create inference examples in
+        query_videos_dir: where to look for the actual mp4 files of the video queries
+    """
+    for video_key, audio_matches in inference_dict.items():
+
+        # Remove .npy from video key to get folder/video name
+        video_name = os.path.splitext(video_key)[0]
+        video_folder = os.path.join(inference_dir, video_name)
+
+        # Create or replace folder
+        if os.path.exists(video_folder):
+            shutil.rmtree(video_folder)
+        os.makedirs(video_folder, exist_ok=True)
+
+
+        #create json file
+        json_file = os.path.join(video_folder, "inference_results.json")
+        with open(json_file, "w") as f:
+            json.dump(audio_matches, f, indent=4)
+
+        # Copy trimmed video
+        trimmed_video_file = os.path.join(query_videos_dir, f"{video_name}.mp4")
+        if os.path.exists(trimmed_video_file):
+            shutil.copy(trimmed_video_file, os.path.join(video_folder, f"{video_name}.mp4"))
+        else:
+            print(f"⚠️ Trimmed video not found for {video_name}, skipping video copy.")
+
+        # Copy matched audio files
+        for index, audio_file in enumerate(audio_matches.keys(), start=1):
+            # Remove .npy if present to get actual wav filename
+            base_audio_name = os.path.splitext(audio_file)[0]
+            audio_source = os.path.join(audios_path, f"{base_audio_name}.wav")
+            ranked_filename = f"{base_audio_name}_rank{index}.wav"
+            dest_path = os.path.join(video_folder, ranked_filename)
+
+            if os.path.exists(audio_source):
+                shutil.copy(audio_source, dest_path)
+            else:
+                print(f"⚠️ Audio file {base_audio_name}.wav not found for {video_name}, skipping.")
+
+    print(f"☑️ Inference examples created in {inference_dir}")
+
+
+
 def evaluate_inference(data_dict, k_values=[1, 5, 10]):
     total_videos = len(data_dict)
     ranks = []
