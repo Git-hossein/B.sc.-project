@@ -772,7 +772,6 @@ if __name__ == "__main__":
     # print("======== Inference and Evaluation ========")
 
     # sample_count = 3000
-    all_video_files = [os.path.splitext(f)[0] for f in os.listdir(video_embeddings_path) if f.endswith(".npy")]
     # if not all_video_files:
     #     raise FileNotFoundError("No video embeddings found.")
     # count = min(sample_count, len(all_video_files))
@@ -792,17 +791,14 @@ if __name__ == "__main__":
 ]
 
     all_video_files.sort(
-        key=lambda f: os.path.getctime(os.path.join(video_embeddings_path, f)),
+        key=lambda f: os.path.getmtime(os.path.join(video_embeddings_path, f)),
         reverse=True
     )
 
     all_video_files = [os.path.splitext(f)[0] for f in all_video_files][:10]
-    result = infer_similar_audio_ultra_fast(query_lst= all_video_files, 
-                                        all_emb_files_tuple=ALL_EMBS_FILES_TUPLE, 
-                                        top_k=5, 
-                                        random_sample=False, 
-                                        random_sample_count=5, 
-                                        temp= 0.01)
-    pprint.pp(result, sort_dicts=False)
-    pprint.pp(evaluate_inference(result, k_values=[1, 5, 10]), sort_dicts=False)
-    create_inference_example(result)
+
+    
+    # pprint.pp(result_old, sort_dicts=False)
+    # pprint.pp(result_ult, sort_dicts=False)
+    # pprint.pp(evaluate_inference(result, k_values=[1, 5, 10]), sort_dicts=False)
+    # create_inference_example(result)
