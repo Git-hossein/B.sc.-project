@@ -98,7 +98,7 @@ def extract_video_embedding(
 
     frame_files = sorted([f for f in os.listdir(input_frame_dir) if f.endswith(".jpg")])
     if len(frame_files) == 0:
-        print(f"⚠️ No frames found for {os.path.basename(output_file)}!")
+        print(f"⚠️ No frames found in{input_frame_dir}!")
         return False
 
     try:
@@ -132,12 +132,17 @@ def extract_video_embedding_fast(
         preprocess= None, 
         device="cuda" if torch.cuda.is_available() else "cpu"):
     
-    
     if model is None or preprocess is None:
         model, preprocess = clip.load("ViT-B/32", device=device)
 
+    if not output_file.endswith(".npy"): 
+        print(f"outfile {output_file} should have extension .npy")
+        return False    
+
     frame_files = sorted([f for f in os.listdir(input_frame_dir) if f.endswith(".jpg")])
-    if not frame_files: return False
+    if not frame_files: 
+        print(f"⚠️ No frames found in{input_frame_dir}!")
+        return False
 
     try:
         # Load all frames into a list first (CPU)
@@ -158,11 +163,57 @@ def extract_video_embedding_fast(
 
         # Save to disk (np.save overwrites by default)
         np.save(output_file, video_emb.cpu().numpy())
-        print(f"✅ Extracted: {os.path.basename(output_file)}")
+        print(f"✅ Extracted video embedding: {os.path.basename(output_file)}")
         return True
 
     except Exception as e:
-        print(f"❌ Error on {input_frame_dir}: {e}")
+        print(f"❌ Error on embedding video {os.path.basename(output_file)} using frames in {input_frame_dir}:\n{e}")
+        return False
+
+
+def extract_video_embedding_safe_fast(
+        input_frame_dir, 
+        output_file, 
+        model=None, 
+        preprocess=None, 
+        batch_size=32, # Added this to prevent the OOM crash we discussed
+        device="cuda" if torch.cuda.is_available() else "cpu"):
+
+    if model is None or preprocess is None:
+        model, preprocess = clip.load("ViT-B/32", device=device)
+
+    frame_files = sorted([f for f in os.listdir(input_frame_dir) if f.endswith(".jpg")])
+    if not frame_files: return False
+
+    try:
+        all_features = []
+        
+        # Process in batches to get the speed of your refactor
+        # without hitting the memory limit of the GPU/RAM
+        for i in range(0, len(frame_files), batch_size):
+            batch_paths = frame_files[i:i + batch_size]
+            
+            # Load and preprocess subset
+            images = [preprocess(Image.open(os.path.join(input_frame_dir, f))) for f in batch_paths]
+            batch_tensor = torch.stack(images).to(device)
+
+            with torch.no_grad():
+                features = model.encode_image(batch_tensor)
+                # Normalize each frame (matches your original behavior)
+                features /= features.norm(dim=-1, keepdim=True)
+                all_features.append(features)
+
+        # Average the embeddings
+        # cat combines the chunks, mean(dim=0) gets the final vector
+        video_emb = torch.cat(all_features, dim=0).mean(dim=0)
+
+        # Save (np.save replaces by default, solving your TODO)
+        np.save(output_file, video_emb.cpu().numpy())
+        print(f"✅ Extracted video embedding: {os.path.basename(output_file)}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Error on embedding video {os.path.basename(output_file)} using frames in {input_frame_dir}:\n{e}")
         return False
 
 
