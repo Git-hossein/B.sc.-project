@@ -125,6 +125,46 @@ def extract_video_embedding(
         return False
 
 
+def extract_video_embedding_fast(
+        input_frame_dir, 
+        output_file, 
+        model= None, 
+        preprocess= None, 
+        device="cuda" if torch.cuda.is_available() else "cpu"):
+    
+    
+    if model is None or preprocess is None:
+        model, preprocess = clip.load("ViT-B/32", device=device)
+
+    frame_files = sorted([f for f in os.listdir(input_frame_dir) if f.endswith(".jpg")])
+    if not frame_files: return False
+
+    try:
+        # Load all frames into a list first (CPU)
+        frames = [preprocess(Image.open(os.path.join(input_frame_dir, f))) for f in frame_files]
+        
+        # Stack into one batch and move to GPU at once
+        # shape: [num_frames, 3, 224, 224]
+        batch = torch.stack(frames).to(device)
+
+        with torch.no_grad():
+            # Process the whole video in one 'gulp'
+            # Note: If you get an 'Out of Memory' error, reduce FPS or process in chunks of 25
+            features = model.encode_image(batch)
+            features /= features.norm(dim=-1, keepdim=True)
+            
+            # Average the embeddings on the GPU
+            video_emb = features.mean(dim=0)
+
+        # Save to disk (np.save overwrites by default)
+        np.save(output_file, video_emb.cpu().numpy())
+        print(f"✅ Extracted: {os.path.basename(output_file)}")
+        return True
+
+    except Exception as e:
+        print(f"❌ Error on {input_frame_dir}: {e}")
+        return False
+
 
 def vggsound_extract_video_embeddings_batch(
         frames_dir, 
@@ -160,7 +200,7 @@ def vggsound_extract_video_embeddings_batch(
 
         frame_folder = os.path.join(frames_dir, vid)
 
-        success = extract_video_embedding(frame_folder,out_file, model,preprocess)
+        success = extract_video_embedding_fast(frame_folder,out_file, model,preprocess, device)
 
         if not success:
             with open(log_file, mode='a', newline='', encoding='utf-8') as f:
