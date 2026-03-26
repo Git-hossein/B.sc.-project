@@ -1,11 +1,16 @@
 from path_settings import paths_config
 # import the modules accordingly
+from video_processing import vggsound_extract_video_embeddings_batch, vggsound_batch_extract_frames_from_vids
+from audio_processing import vggsound_extract_audio_from_videos_batch, vggsound_extract_audio_embeddings_batch
+from vggsound_processing import check_integrity
 import os
 import csv
 import numpy as np
 import soundfile as sf
 from PIL import Image
 import csv
+import pprint
+from wakepy import keep 
 import random
 import shutil
 
@@ -545,7 +550,7 @@ if __name__ == "__main__":
     # videos_training = vggsound_training_videos_generator("vggsound.csv", 3360, 1000, "train")
     # vggsound_batch_down_trim(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
     # check_integrity()
-    # ALL_EMBS_FILES_TUPLE = load_all_normed_embeddings(audio_embeddings_path)
+    ALL_EMBS_FILES_TUPLE = load_all_normed_embeddings(audio_embeddings_path)
     # pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
     # pprint.pp(infer_similar_audio_fast(query= "-0gYWIOfqdM",all_emb_files_tuple= ALL_EMBS_FILES_TUPLE, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
     # example = infer_similar_audio_ultra_fast(query_lst= ["--XInAaMS6k", "-0gYWIOfqdM", "-3M-k4nIYIM"],all_emb_files_tuple=ALL_EMBS_FILES_TUPLE, top_k=5, random_sample=False, random_sample_count=3, temp= 0.01)
@@ -555,4 +560,48 @@ if __name__ == "__main__":
     # print(cosine_similarity(np.load(os.path.join(video_embeddings_path, "-3M-k4nIYIM.npy")).squeeze(), 
     #                         np.load(os.path.join(audio_embeddings_path, "-3M-k4nIYIM.npy")).squeeze()))
     # print(cosine_similarity(np.load(os.path.join(video_embeddings_path, "-3M-k4nIYIM.npy")).squeeze(), 
-    #                         np.load(os.path.join(audio_embeddings_path, "-9whJW7BUSU.npy")).squeeze()))                        
+    #                         np.load(os.path.join(audio_embeddings_path, "-9whJW7BUSU.npy")).squeeze()))   
+
+    # with keep.running():    
+    #     vggsound_extract_audio_from_videos_batch(trimmed_videos_dir= trimmed_videos_path, audios_dir= audios_path, log_file=extract_audio_log_file)
+    #     vggsound_extract_audio_embeddings_batch(audios_dir=audios_path, embeddings_dir= audio_embeddings_path, log_file=embeddings_audio_log_file)
+    #     vggsound_batch_extract_frames_from_vids(trimmed_videos_dir= trimmed_videos_path, frames_dir= video_frames_path)
+    #     vggsound_extract_video_embeddings_batch(frames_dir= video_frames_path, video_embeddings_dir= video_embeddings_path, log_file= video_embeddings_log_file)    
+    
+    # print("======== Inference and Evaluation ========")
+
+    # sample_count = 3000
+    all_video_files = [os.path.splitext(f)[0] for f in os.listdir(video_embeddings_path) if f.endswith(".npy")]
+    # if not all_video_files:
+    #     raise FileNotFoundError("No video embeddings found.")
+    # count = min(sample_count, len(all_video_files))
+    # final_keys = all_video_files[:count]
+    # result = infer_similar_audio_ultra_fast(query_lst=final_keys, 
+    #                                         all_emb_files_tuple=ALL_EMBS_FILES_TUPLE, 
+    #                                         top_k=sample_count, 
+    #                                         random_sample=False, 
+    #                                         random_sample_count=0, 
+    #                                         temp= 0.01)
+    # metrics = evaluate_inference(result, k_values=[1, 5, 10, 50])
+    # print("Evaluation Metrics:")
+    # pprint.pp(metrics, sort_dicts=False)
+    all_video_files = [
+    f for f in os.listdir(video_embeddings_path)
+    if f.endswith(".npy")
+]
+
+    all_video_files.sort(
+        key=lambda f: os.path.getctime(os.path.join(video_embeddings_path, f)),
+        reverse=True
+    )
+
+    all_video_files = [os.path.splitext(f)[0] for f in all_video_files][:10]
+    result = infer_similar_audio_ultra_fast(query_lst= all_video_files, 
+                                        all_emb_files_tuple=ALL_EMBS_FILES_TUPLE, 
+                                        top_k=5, 
+                                        random_sample=False, 
+                                        random_sample_count=5, 
+                                        temp= 0.01)
+    pprint.pp(result, sort_dicts=False)
+    pprint.pp(evaluate_inference(result, k_values=[1, 5, 10]), sort_dicts=False)
+    create_inference_example(result)
