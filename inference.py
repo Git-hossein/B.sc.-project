@@ -236,53 +236,6 @@ def infer_similar_audio_ultra_fast_ultimate(
     return results
 
 
-def create_inference_example(inference_dict, inference_dir = inferred_example_path):
-    """
-    Given a dictionary returned by `infer_similar_audio` and destination directory, creates a folder structure
-    with trimmed videos and matched audio files for easy viewing.
-
-    Folder structure:
-    inference_dir/
-        query_video_name/
-            query_video_name.mp4
-            matched_audio1.wav
-            matched_audio2.wav
-            ...
-
-    Args:
-        inference_dict (dict): output of `infer_similar_audio`
-        inference_dir (str): path to create inference examples in
-    """
-    for video_key, audio_matches in inference_dict.items():
-        # Remove .npy from video key to get folder/video name
-        video_name = os.path.splitext(video_key)[0]
-        video_folder = os.path.join(inference_dir, video_name)
-
-        # Create or replace folder
-        if os.path.exists(video_folder):
-            shutil.rmtree(video_folder)
-        os.makedirs(video_folder, exist_ok=True)
-
-        # Copy trimmed video
-        trimmed_video_file = os.path.join(trimmed_videos_path, f"{video_name}.mp4")
-        if os.path.exists(trimmed_video_file):
-            shutil.copy(trimmed_video_file, os.path.join(video_folder, f"{video_name}.mp4"))
-        else:
-            print(f"⚠️ Trimmed video not found for {video_name}, skipping video copy.")
-
-        # Copy matched audio files
-        for audio_file in audio_matches.keys():
-            # Remove .npy if present to get actual wav filename
-            audio_name = os.path.splitext(audio_file)[0] + ".wav" if audio_file.endswith(".npy") else audio_file
-            audio_source = os.path.join(audios_path, audio_name)
-            if os.path.exists(audio_source):
-                shutil.copy(audio_source, os.path.join(video_folder, audio_name))
-            else:
-                print(f"⚠️ Audio file {audio_name} not found for {video_name}, skipping.")
-
-    print(f"☑️ Inference examples created in {inference_dir}")
-
-
 
 
 
