@@ -1,0 +1,158 @@
+import os
+import csv
+import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Literal, Iterator, Any
+import yt_dlp
+from wakepy import keep
+from path_settings import paths_config
+
+# A lock to prevent multiple threads from writing to the log file at the same time
+log_lock = threading.Lock()
+
+def vggsound_training_videos_generator(
+        vggsound_path, 
+        nmany=1033, 
+        start=0, 
+        type: Literal["train", "test"] = "train"
+        ) -> Iterator[tuple[str, int, str]]:
+    print("extracting training videos from csv...")
+    with open(vggsound_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        skipped = 0
+        yielded = 0
+        for row in reader:
+            if row[3].strip() != type:
+                continue
+            if skipped < start:
+                skipped += 1
+                continue
+            if yielded >= nmany:
+                break
+            yielded += 1
+            yield (row[0], int(row[1]), row[2])
+
+def download_youtube_video_range(video_id, output_path, start_sec, duration=10):
+    """MODIFIED: Downloads only the specific range to save bandwidth."""
+    if not os.path.exists(output_path):
+        print(f"⬇️ Downloading range for {video_id}...")
+        ydl_opts: Any = {
+            'format': 'mp4',
+            'outtmpl': output_path,
+            'cookiesfrombrowser': ('firefox',),
+            'retries': 10,
+            'fragment_retries': 10,
+            'continuedl': True,
+            'quiet': True,
+            'noprogress': True,
+            'remote_components': ['ejs:github'],
+            # Range download logic
+            'download_ranges': lambda info_dict, ydl: [{
+                'start_time': start_sec,
+                'end_time': start_sec + duration,
+            }],
+            'force_keyframes_at_cuts': True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+            return True
+        except Exception as e:
+            print(f"Failed to download {video_id}: {e}")
+            return False
+    else:
+        return True
+
+def trim_video(input_path, output_path, start_sec, duration=10):
+    """UNCHANGED: Exact same parameters as your old code for parity."""
+    if os.path.exists(output_path):
+        return True
+    try:
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-ss", str(start_sec),
+            "-i", input_path,
+            "-t", str(duration),
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "veryfast",
+            "-c:a", "aac",
+            output_path
+        ], check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def process_single_video_p(video_info, full_videos_path, trimmed_videos_path, log_file, clip_length):
+    """New helper to manage the download->trim pipeline for one thread."""
+    video_id, start_sec, label = video_info
+    full_file = os.path.join(full_videos_path, f"{video_id}_full.mp4")
+    trim_file = os.path.join(trimmed_videos_path, f"{video_id}.mp4")
+    
+    # 1. Download the range
+    dl_success = download_youtube_video_range(video_id, full_file, start_sec, clip_length)
+
+    # 2. Trim/Re-encode
+    trim_success = False
+    if dl_success:
+        # NOTE: Because yt-dlp already cut the video, 'full_file' now starts at 0.
+        # We use 0 here so FFmpeg re-encodes the clip exactly like your old ones.
+        trim_success = trim_video(full_file, trim_file, 0, clip_length)
+
+    # 3. Thread-safe Logging
+    if not dl_success or not trim_success:
+        with log_lock:
+            with open(log_file, mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([video_id,
+                                "success" if dl_success else "failed",
+                                "success" if trim_success else "failed"])
+
+
+
+@keep.running
+def vggsound_batch_down_trim_parralel(video_list, full_videos_path, trimmed_videos_path, log_file, clip_length=10, max_workers=4):
+    """MODIFIED: Uses ThreadPoolExecutor for concurrent processing."""
+    os.makedirs(full_videos_path, exist_ok=True)
+    os.makedirs(trimmed_videos_path, exist_ok=True)
+
+    if not os.path.exists(log_file):
+        with open(log_file, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["video_id", "download", "trim"])
+
+    print(f"🚀 Starting parallel processing with {max_workers} workers...")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(process_single_video_p, v, full_videos_path, trimmed_videos_path, log_file, clip_length)
+            for v in video_list
+        ]
+        # This loop waits for all threads to finish
+        for future in futures:
+            future.result()
+
+# --- HOW TO CALL IT ---
+
+
+if __name__ == "__main__":
+
+    # 1. Setup your paths
+    CSV_PATH = paths_config.vggsound_path
+    FULL_PATH = paths_config.test_full_videos_path
+    TRIMMED_PATH = paths_config.test_trimmed_videos_path
+    LOG_PATH = paths_config.test_download_and_trim_log_file
+
+    # 2. Initialize the generator and convert to a list for the batch processor
+    videos_to_process = list(vggsound_training_videos_generator(CSV_PATH, nmany=1000, start=2000, type="test"))
+
+    # 3. Run the batch
+    # vggsound_batch_down_trim_parralel(
+    #     video_list=videos_to_process,
+    #     full_videos_path=FULL_PATH,
+    #     trimmed_videos_path=TRIMMED_PATH,
+    #     log_file=LOG_PATH,
+    #     clip_length=10,
+    #     max_workers=2  # Adjust this based on your network speed
+    # )
