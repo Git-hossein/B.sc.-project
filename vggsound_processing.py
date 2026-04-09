@@ -185,9 +185,9 @@ def check_integrity(full_dir= paths_config.full_videos_path, trimmed_dir= paths_
     print("="*50)
 
     if missing_from_trimmed:
-        print(f"⚠️  MISSING IN TRIMMED ({len(missing_from_trimmed)} IDs)")
+        print(f"⚠️  MISSING IN TRIMMED ({len(missing_from_trimmed)} IDs) : \n{print(missing_from_trimmed)}")
     if missing_from_full:
-        print(f"⚠️  MISSING IN FULL ({len(missing_from_full)} IDs)")
+        print(f"⚠️  MISSING IN FULL ({len(missing_from_full)} IDs) : \n{print(missing_from_full)}")
 
     if invalid_naming_full or invalid_naming_trimmed:
         print(f"🚫 INVALID NAMES: Full ({len(invalid_naming_full)}) | Trimmed ({len(invalid_naming_trimmed)})")
