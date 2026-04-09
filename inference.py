@@ -14,6 +14,7 @@ from wakepy import keep
 import random
 import json
 import shutil
+from typing import Optional
 
 
 
@@ -79,19 +80,31 @@ def softmax(scores, T = 1.0):
 
 
 
-def load_all_normed_embeddings(embeddings_dir):
-    files = sorted([f for f in os.listdir(embeddings_dir) if f.endswith(".npy")])
-    all_embs = []
-    filenames = []
+def load_all_normed_embeddings(embeddings_dir:str, names: Optional[list[str]] = None):
+    """ Load and normalize embeddings from a directory; optionally only load embeddings for specified names """
+
+    if names is not None:
+        add_npy_extension = lambda f: f if f.endswith(".npy") else f"{os.path.splitext(f)[0]}.npy"
+        files = [add_npy_extension(name) for name in names]
+
+    else:
+        files = sorted([f for f in os.listdir(embeddings_dir) if f.endswith(".npy")])
+
+    file_emb_dict = {}
     
     for f in files:
-        emb = np.load(os.path.join(embeddings_dir, f)).squeeze()
+        full_path = os.path.join(embeddings_dir, f)
+
+        if not os.path.exists(full_path):
+            raise Exception(f"⚠️ cannot load {f}: Not found on disk.")
+        
+        emb = np.load(full_path).squeeze()
         # Pre-normalize for faster cosine similarity later
         norm = np.linalg.norm(emb)
-        all_embs.append(emb / (norm if norm > 0 else 1e-9))
-        filenames.append(f)
+        file_emb_dict[f] = emb / (norm if norm > 0 else 1e-9)
         
-    return np.array(all_embs), filenames
+    return file_emb_dict
+
 
 
 
@@ -99,16 +112,35 @@ def load_all_normed_embeddings(embeddings_dir):
 
 def find_top_k_similar_ultra_fast_ultimate(
         query_embs: np.ndarray, 
-        all_emb_files_tuple: tuple[np.ndarray, list[str]] | None = None, 
+        all_emb_dict: Optional[dict[str, np.ndarray]]= None, 
         embeddings_dir: str = "path/to/embeddings", 
         k: int = 5, 
         T: float = 1.0):
+    """
+    Docstring for find_top_k_similar_ultra_fast_ultimate
+    
+    :param query_embs: Description
+    :type query_embs: np.ndarray
+    :param all_emb_dict: Description
+    :type all_emb_dict: Optional[dict[str, np.ndarray]]
+    :param embeddings_dir: Description
+    :type embeddings_dir: str
+    :param k: Description
+    :type k: int
+    :param T: Description
+    :type T: float
+    :return: Description
+    :rtype: Any
+    """
 
     # 1. Fallback Loading Logic
-    if all_emb_files_tuple is None:
-        ALL_AUDIO_EMBS, AUDIO_FILENAMES = load_all_normed_embeddings(embeddings_dir)
-    else:
-        ALL_AUDIO_EMBS, AUDIO_FILENAMES = all_emb_files_tuple
+    if all_emb_dict is None:
+
+        all_emb_dict = load_all_normed_embeddings(embeddings_dir)
+
+    AUDIO_FILENAMES = list(all_emb_dict.keys())
+    ALL_AUDIO_EMBS = np.array(list(all_emb_dict.values()))
+    
 
     # 2. Ensure query is 2D (Matrix)
     # If a single query is passed (1D), convert it to (1, D)
@@ -166,19 +198,35 @@ def find_top_k_similar_ultra_fast_ultimate(
 
 def infer_similar_audio_ultra_fast_ultimate(
         query_lst: list[str] | None = None, 
-        all_emb_files_tuple: tuple[np.ndarray, list[str]] | None = None, 
+        all_emb_dict: Optional[dict[str, np.ndarray]]= None, 
         top_k: int = 5, 
         random_sample: bool = False, 
         random_sample_count: int = 1, 
         temp: float = 1.0
     ):
+    """
+    Docstring for infer_similar_audio_ultra_fast_ultimate
     
+    :param query_lst: Description
+    :type query_lst: list[str] | None
+    :param all_emb_dict: Description
+    :type all_emb_dict: Optional[dict[str, np.ndarray]]
+    :param top_k: Description
+    :type top_k: int
+    :param random_sample: Description
+    :type random_sample: bool
+    :param random_sample_count: Description
+    :type random_sample_count: int
+    :param temp: Description
+    :type temp: float
+    """
+
     video_embeddings_dir = video_embeddings_path
     
     # 1. Ensure we have the audio embeddings loaded
-    if all_emb_files_tuple is None:
+    if all_emb_dict is None:
         print("Embeddings is None. Loading audio embeddings manually...")
-        all_emb_files_tuple = load_all_normed_embeddings(audio_embeddings_path)
+        all_emb_dict = load_all_normed_embeddings(audio_embeddings_path)
 
     query_matrix = []
     final_keys = []
@@ -222,7 +270,7 @@ def infer_similar_audio_ultra_fast_ultimate(
     # NOTE: Ensure your find_top_k_similar_fast handles 2D input as discussed
     top_similars_batch = find_top_k_similar_ultra_fast_ultimate(
         query_matrix, 
-        all_emb_files_tuple, 
+        all_emb_dict, 
         k=top_k, 
         T=temp
     )
@@ -298,11 +346,11 @@ def create_inference_example_ultimate(inference_dict, inference_dir = inferred_e
 
 
 
-def evaluate_inference(data_dict, k_values=[1, 5, 10]):
-    total_videos = len(data_dict)
+def evaluate_inference(infer_dict, k_values=[1, 5, 10]):
+    total_videos = len(infer_dict)
     ranks = []
 
-    for vid, audios in data_dict.items():
+    for vid, audios in infer_dict.items():
         audio_ids = list(audios.keys())
         try:
             rank = audio_ids.index(vid) + 1
