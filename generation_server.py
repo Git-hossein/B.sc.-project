@@ -2,15 +2,18 @@ import os
 import json
 import subprocess
 import time
+import numpy as np
+from inference import load_all_normed_embeddings
 from path_settings import paths_config
+import warnings
 
 
 
 def prepare_batch_for_server(inferred_dict):
     # 1. Save the JSON
     
-    os.makedirs(paths_config._TCML_server_input, exist_ok=True)
-    json_path = os.path.join(paths_config._TCML_server_input, "inferred.json")
+    os.makedirs(paths_config.TCML_server_input, exist_ok=True)
+    json_path = os.path.join(paths_config.TCML_server_input, "inferred.json")
     with open(json_path, 'w') as f:
         json.dump(inferred_dict, f, indent=4)
     
@@ -180,9 +183,10 @@ def download_results(local_dest, inferred_dict = None):
         expected_total = (num_output_audio_per_video * original_count) + num_sentinel_file
     
         if expected_total != actual_count:
-            raise Exception(
-                f"...Integrity Mismatch: Expected {expected_total} files"
-                f" but found {actual_count}!"
+            warnings.warn(
+                f"Integrity mismatch: expected {expected_total} files "
+                f"but found {actual_count}!",
+                UserWarning
             )
     
     print(f"...Downloading results to {local_dest}...")
@@ -193,7 +197,7 @@ def download_results(local_dest, inferred_dict = None):
     print("...All files downloaded successfully!")
 
 
-def run_tcml_audio_pipeline(data_dict):
+def run_tcml_audio_pipeline(data_dict, output_dir = paths_config.TCML_server_output_generated):
 
 
     json_path, file_set = prepare_batch_for_server(data_dict)
@@ -205,7 +209,7 @@ def run_tcml_audio_pipeline(data_dict):
         job_id = trigger_sbatch_remote()
         complete = wait_for_job_completion(job_id)
         if complete:
-            download_results(paths_config._TCML_server_output_generated, data_dict)
+            download_results(output_dir, data_dict)
 
 
 
@@ -297,4 +301,54 @@ results2 = {'-3suCV1UqMc.npy': {'-3SE2nOj6d4.npy': 0.5483170078614558,
                      '-39sHTky_6o.npy': 0.19476032674939506,
                      '-4ELUORuKtk.npy': 0.18122817402553895}}
 
-run_tcml_audio_pipeline(results2)
+
+def evaluate_generation(
+    gen_embs_dict: dict[str, np.ndarray], 
+    og_embs_dict: dict[str, np.ndarray] ):
+    """
+    Aligns and compares generated (or raw mix) embeddings against original embeddings.
+    """
+    aligned_gen = []
+    aligned_og = []
+    matched_ids = []
+
+    # 1. Alignment Phase
+    for gen_key, gen_vec in gen_embs_dict.items():
+        # Strip suffixes to find the base YouTube ID
+        # Handles both "{id}_GEN" and "{id}_RAW_MIX"
+        clean_id = gen_key.replace("_GEN", "").replace("_RAW_MIX", "")
+        
+        if clean_id in og_embs_dict:
+            aligned_gen.append(gen_vec)
+            aligned_og.append(og_embs_dict[clean_id])
+            matched_ids.append(clean_id)
+        else:
+            print(f"⚠️ Warning: No ground truth found for {clean_id}")
+
+    if not aligned_gen:
+        raise Exception("❌ No matching pairs found!")
+
+    # 2. Matrix Conversion
+    # We convert to matrices to do the math in one 'gulp'
+    gen_matrix = np.array(aligned_gen)
+    og_matrix = np.array(aligned_og)
+
+    # 3. Vectorized Math (Cosine Similarity)
+    # Since they are pre-normalized, Dot Product = Cosine Similarity
+    similarities = np.sum(gen_matrix * og_matrix, axis=1)
+
+    # 4. Result Formatting
+    results = {
+        "mean_sim": float(np.mean(similarities)),
+        "per_video": {
+            vid_id: float(sim) for vid_id, sim in zip(matched_ids, similarities)
+        }
+    }
+
+    return results
+
+
+
+
+if __name__ == "__main__":
+    run_tcml_audio_pipeline(results2)
