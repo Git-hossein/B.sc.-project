@@ -32,8 +32,8 @@ class _PathSettings:
         self.inferred_example_path = "./inferred_examples"
         self.TCML_server_input = os.path.join(self._TCML_server_base_path, "input")
         self.TCML_server_output_generated = os.path.join(self._TCML_server_base_path, "output/generated_audios")
-        self.experiments_seen_path = os.path.join(self.experiments_base_path ,"/seen")
-        self.experiments_unseen_path = os.path.join(self.experiments_base_path ,"/unseen")
+        self.experiments_seen_path = os.path.join(self.experiments_base_path ,"seen")
+        self.experiments_unseen_path = os.path.join(self.experiments_base_path ,"unseen")
         self.test_full_videos_path = os.path.join(self.base_path, "test/full_videos")
         self.test_trimmed_videos_path = os.path.join(self.base_path, "test/trimmed_videos")
         self.test_video_frames_path = os.path.join(self.base_path, "test/frames")
