@@ -198,6 +198,7 @@ def find_top_k_similar_ultra_fast_ultimate(
 
 def infer_similar_audio_ultra_fast_ultimate(
         query_lst: list[str] | None = None, 
+        query_dir = paths_config.video_embeddings_path,
         all_emb_dict: Optional[dict[str, np.ndarray]]= None, 
         top_k: int = 5, 
         random_sample: bool = False, 
@@ -221,7 +222,7 @@ def infer_similar_audio_ultra_fast_ultimate(
     :type temp: float
     """
 
-    video_embeddings_dir = video_embeddings_path
+    video_embeddings_dir = query_dir
     
     # 1. Ensure we have the audio embeddings loaded
     if all_emb_dict is None:
@@ -238,7 +239,7 @@ def infer_similar_audio_ultra_fast_ultimate(
         
         for q in query_lst:
             # Handle full path vs ID
-            path = q if os.path.exists(q) else os.path.join(video_embeddings_dir, f"{q}.npy")
+            path = q if os.path.exists(q) else os.path.join(video_embeddings_dir, f"{os.path.splitext(q)[0]}.npy")
             if not os.path.exists(path):
                 print(f"Warning: Skipping {q}, file not found.")
                 continue
