@@ -6,6 +6,8 @@ import csv
 import numpy as np
 import soundfile as sf
 from path_settings import paths_config
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 
 def vggsound_extract_audio_from_videos_batch(trimmed_videos_dir, audios_dir, sample_rate=16000, log_file=paths_config.extract_audio_log_file):
     """
@@ -105,3 +107,59 @@ def vggsound_extract_audio_embeddings_batch(audios_dir, embeddings_dir, wav2clip
             with open(log_file, "a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow([video_id, "failed"])
+
+
+
+
+def process_single_audio(audio_file, audios_dir, embeddings_dir, log_file):
+    video_id = os.path.splitext(audio_file)[0]
+    audio_path = os.path.join(audios_dir, audio_file)
+    embedding_path = os.path.join(embeddings_dir, f"{video_id}.npy")
+
+    if os.path.exists(embedding_path):
+        return None # Skip
+
+    try:
+        # Load and Preprocess
+        audio_waveform, sr = sf.read(audio_path)
+        if len(audio_waveform.shape) == 2:
+            audio_waveform = audio_waveform.mean(axis=1)
+        audio_waveform = audio_waveform.astype(np.float32)
+
+        # Model is loaded inside the worker or passed via a global-init
+        # For simplicity in CPU tasks, we can initialize it inside the worker 
+        # or use a global variable if using an initializer.
+        global worker_model
+        if 'worker_model' not in globals():
+            worker_model = wav2clip.get_model()
+
+        embedding = wav2clip.embed_audio(audio_waveform, worker_model)
+        np.save(embedding_path, embedding)
+        return (video_id, "success")
+
+    except Exception as e:
+        return (video_id, str(e))
+
+def vggsound_extract_audio_embeddings_parallel(audios_dir, embeddings_dir, log_file=None, num_workers=2):
+    if log_file is None:
+        log_file = paths_config.LOGS_FILENAME # or your default
+
+    audio_files = [f for f in os.listdir(audios_dir) if f.endswith(".wav")]
+    print(f"🚀 Starting parallel embedding for {len(audio_files)} files using {num_workers or 'all'} cores...")
+
+    # Partial function to fix the directory arguments
+    func = partial(process_single_audio, audios_dir=audios_dir, 
+                   embeddings_dir=embeddings_dir, log_file=log_file)
+
+    results = []
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        results = list(executor.map(func, audio_files))
+
+    # Handle Logging after parallel work to avoid file-write collisions
+    with open(log_file, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for res in results:
+            if res and res[1] != "success":
+                writer.writerow([res[0], f"failed: {res[1]}"])
+                
+    print("✅ Parallel processing complete.")

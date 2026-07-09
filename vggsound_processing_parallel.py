@@ -137,15 +137,48 @@ def vggsound_batch_down_trim_parralel(video_list, full_videos_path, trimmed_vide
 
 
 if __name__ == "__main__":
+    from audio_processing import vggsound_extract_audio_embeddings_batch, vggsound_extract_audio_from_videos_batch
+    from video_processing import vggsound_extract_video_embeddings_batch, vggsound_batch_extract_frames_from_vids
+    from vggsound_processing import vggsound_batch_down_trim
+    os.makedirs(paths_config.test_audios_path, exist_ok= True)
+    os.makedirs(paths_config.test_audio_embeddings_path, exist_ok= True)
+    os.makedirs(paths_config.test_video_embeddings_path, exist_ok= True)
 
+    # Log files path
+    download_and_trim_log_file = paths_config.test_download_and_trim_log_file
+    extract_audio_log_file = paths_config.test_extract_audio_log_file
+    embeddings_audio_log_file = paths_config.test_embeddings_audio_log_file
+    video_embeddings_log_file = paths_config.test_video_embeddings_log_file
+
+    # Create log file with headers if it doesn't exist
+    if not os.path.exists(download_and_trim_log_file):
+        with open(download_and_trim_log_file, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["video_id", "download", "trim"])
+
+    if not os.path.exists(extract_audio_log_file):
+        with open(extract_audio_log_file, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["video_id", "extract_audio_status"])
+
+    if not os.path.exists(embeddings_audio_log_file):
+        with open(embeddings_audio_log_file, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["video_id", "audio_embedding_status"])
+
+    if not os.path.exists(video_embeddings_log_file):
+        with open(video_embeddings_log_file, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(["video_id", "embed_status"])
     # 1. Setup your paths
     CSV_PATH = paths_config.vggsound_path
     FULL_PATH = paths_config.test_full_videos_path
     TRIMMED_PATH = paths_config.test_trimmed_videos_path
     LOG_PATH = paths_config.test_download_and_trim_log_file
 
+    
     # 2. Initialize the generator and convert to a list for the batch processor
-    videos_to_process = list(vggsound_training_videos_generator(CSV_PATH, nmany=1000, start=2000, type="test"))
+    videos_to_process = list(vggsound_training_videos_generator(CSV_PATH, nmany=350, start=6000, type="test"))
 
     # 3. Run the batch
     # vggsound_batch_down_trim_parralel(
@@ -154,5 +187,25 @@ if __name__ == "__main__":
     #     trimmed_videos_path=TRIMMED_PATH,
     #     log_file=LOG_PATH,
     #     clip_length=10,
-    #     max_workers=2  # Adjust this based on your network speed
+    #     max_workers=3  # Adjust this based on your network speed
     # )
+    downed= [f"{vid.rsplit("_full")[0]}.mp4" for vid in os.listdir(paths_config.test_full_videos_path)]
+
+    trimmed = [vid for vid in os.listdir(paths_config.test_trimmed_videos_path)]
+
+    gen_vids = []
+    for vid in downed:
+        if vid not in trimmed:
+            vid_id = os.path.splitext(vid)[0]
+            gen_vids.append((vid_id, 0, "test")) 
+
+    # vggsound_batch_down_trim(gen_vids, paths_config.test_full_videos_path, paths_config.test_trimmed_videos_path, paths_config.test_download_and_trim_log_file)
+    vggsound_batch_extract_frames_from_vids(paths_config.test_trimmed_videos_path, paths_config.test_video_frames_path)
+    vggsound_extract_video_embeddings_batch(paths_config.test_video_frames_path, paths_config.test_video_embeddings_path, paths_config.test_video_embeddings_log_file)
+    vggsound_extract_audio_from_videos_batch(paths_config.test_trimmed_videos_path, paths_config.test_audios_path, log_file=paths_config.test_extract_audio_log_file)
+    vggsound_extract_audio_embeddings_batch(paths_config.test_audios_path, paths_config.test_audio_embeddings_path, log_file= paths_config.test_embeddings_audio_log_file)
+
+    # trim_video("/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/test/full_videos/L9nIN8KrWfQ_full.mp4", 
+    #            "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/test/trimmed_videos/L9nIN8KrWfQ_trimmed.mp4",
+    #            0,
+    #            10)

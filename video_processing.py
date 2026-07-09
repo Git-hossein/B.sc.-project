@@ -267,35 +267,13 @@ if __name__ == "__main__":
     from vggsound_processing import download_youtube_video, trim_video
 
     
-    trimmed_video = "/home/hossein/Desktop/testing/-6VFTlZsft4_trim.mp4"
     #download_youtube_video("-6VFTlZsft4", "/home/hossein/Desktop/testing/-6VFTlZsft4.mp4") 
     # trim_video("/home/hossein/Desktop/testing/-6VFTlZsft4.mp4", "/home/hossein/Desktop/testing/-6VFTlZsft4_trim.mp4", 30)
     # extract_frames_from_video(trimmed_video, "/home/hossein/Desktop/testing/-6VFTlZsft4_frames")
-    import pprint
+
     # model, preprocess = clip.load("ViT-B/32", device="cuda" if torch.cuda.is_available() else "cpu")
     # extract_video_embedding("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4.npy", model, preprocess)
     # extract_video_embedding_fast("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4_fast.npy", model, preprocess)
     # extract_video_embedding_safe_fast("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4_safefast.npy", model, preprocess)
 
-
-    def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-        """
-        Compute cosine similarity between two 1D numpy arrays.
-        """
-        a_norm = a / np.linalg.norm(a)
-        b_norm = b / np.linalg.norm(b)
-        return float(np.dot(a_norm, b_norm))
-    emb_orig = np.load("/home/hossein/Desktop/testing/-6VFTlZsft4.npy")
-    emb_fast = np.load("/home/hossein/Desktop/testing/-6VFTlZsft4_fast.npy")
-    emb_safe = np.load("/home/hossein/Desktop/testing/-6VFTlZsft4_safefast.npy")
-    diff_fast = np.abs(emb_orig - emb_fast).max()
-    diff_safe = np.abs(emb_orig - emb_safe).max()
-    diff_fast_safe = np.abs(emb_fast - emb_safe).max()
-
-    print(f"Max difference (Orig vs Fast): {diff_fast:.2e}")
-    print(f"Max difference (Orig vs Safe): {diff_safe:.2e}")
-    print(f"Max difference (Fast vs Safe): {diff_fast_safe:.2e}")
-
-    print(cosine_similarity(emb_orig, emb_fast))
-    print(cosine_similarity(emb_orig, emb_safe))
-    print(cosine_similarity(emb_fast, emb_safe))
+    vggsound_batch_extract_frames_from_vids(paths_config.test_trimmed_videos_path, paths_config.test_video_frames_path)

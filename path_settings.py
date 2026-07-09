@@ -38,15 +38,18 @@ class _PathSettings:
         self.test_trimmed_videos_path = os.path.join(self.base_path, "test/trimmed_videos")
         self.test_video_frames_path = os.path.join(self.base_path, "test/frames")
         self.test_audios_path = os.path.join(self.base_path, "test/audios")
-        self.test_audio_embeddings_path = os.path.join(self.base_path, "audio_embeddings")
-        self.test_video_embeddings_path = os.path.join(self.base_path, "video_embeddings")
+        self.test_audio_embeddings_path = os.path.join(self.base_path, "test/audio_embeddings")
+        self.test_video_embeddings_path = os.path.join(self.base_path, "test/video_embeddings")
 
         # Logs (same for both systems)
         self.download_and_trim_log_file = "./Logs_download_trim.csv"
-        self.test_download_and_trim_log_file = "./Temp_Logs_download_trim.csv"
+        self.test_download_and_trim_log_file = "./Test_Logs_download_trim.csv"
         self.extract_audio_log_file = "./Logs_extract_audio.csv"
+        self.test_extract_audio_log_file = "./Test_Logs_extract_audio.csv"
         self.embeddings_audio_log_file = "./Logs_audio_embeddings.csv"
+        self.test_embeddings_audio_log_file = "./Test_Logs_audio_embeddings.csv"
         self.video_embeddings_log_file = "./Logs_video_embeddings.csv"
+        self.test_video_embeddings_log_file = "./Test_Logs_video_embeddings.csv"
         self.vggsound_path = "./vggsound.csv"
 
 

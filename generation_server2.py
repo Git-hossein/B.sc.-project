@@ -11,26 +11,26 @@ import datetime
 import glob
 import tarfile
 
-SBATCH_TCML_PATH = "/home/sherkat/B.sc.-Audiocraft-module/generate_audio.sbatch"
+SBATCH_TCML_PATH = "/home/sherkat/B.sc.-Audiocraft-module/generate_audio2.sbatch"
 SESSION_ID_FORMAT = "%Y%m%d_%H%M%S_%f"
 CONFIG_JSON = "config.json"
-CHUNK_JSON = "chunk_{idx}.json"
+VIDS_JSON = "chunk_{idx}.json"
 
 
-def chunk_dict(data, n_chunks):
-    """Splits a dictionary into n roughly equal parts."""
-    keys = list(data.keys())
+def chunk_list(list, n_chunks):
+    """Splits a list into n roughly equal parts."""
+
     # Calculate size of each chunk
-    size = int(np.ceil(len(keys) / n_chunks))
+    size = int(np.ceil(len(list) / n_chunks))
     
     chunks = []
-    for i in range(0, len(keys), size):
-        chunk_keys = keys[i:i + size]
-        chunks.append({k: data[k] for k in chunk_keys})
+    for i in range(0, len(list), size):
+        chunk = list[i:i + size]
+        chunks.append(chunk)
     return chunks
 
 
-def prepare_parallel_batch(inferred_dict, num_GPU, options):
+def prepare_parallel_batch(vid_list, num_GPU, options):
     # 1. Create a unique session folder locally
     session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     local_session_path = os.path.join(paths_config.TCML_server_input, session_id)
@@ -42,28 +42,17 @@ def prepare_parallel_batch(inferred_dict, num_GPU, options):
         json.dump(options, f, indent=4)
 
     # 3. Split and Save Chunks
-    chunks = chunk_dict(inferred_dict, num_GPU)
+    chunks = chunk_list(vid_list, num_GPU)
     for idx, chunk in enumerate(chunks):
         chunk_path = os.path.join(local_session_path, f"chunk_{idx}.json")
         with open(chunk_path, 'w') as f:
             json.dump(chunk, f, indent=4)
-
-    # 4. Build Media Upload Set (same as before, just looking at the whole dict)
-    upload_set = set()
-    for matches in inferred_dict.values():
-        for audio_emb in matches.keys():
-            target_audio_id = os.path.splitext(audio_emb)[0]
-            target_audio_path = os.path.join(paths_config.audios_path, f"{target_audio_id}.wav")
-            if os.path.exists(target_audio_path):
-                upload_set.add(target_audio_path)
-            else:
-                raise FileNotFoundError(f"Missing: {target_audio_path}")
             
-    return local_session_path, upload_set, session_id, len(chunks)
+    return local_session_path, session_id, len(chunks)
 
 
 
-def upload_parallel_to_tcml(local_session_dir, upload_set, session_id):
+def upload_parallel_to_tcml(local_session_dir, session_id):
     remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
     # We now create a unique path for this specific run
     remote_base = "/home/sherkat/B.sc.-Audiocraft-module/Hossein/input/"
@@ -76,40 +65,7 @@ def upload_parallel_to_tcml(local_session_dir, upload_set, session_id):
     print("... Uploading JSON chunks and config")
     # Using '/*' to send the contents of the local folder to the remote session folder
     subprocess.run(["rsync", "-avz", f"{local_session_dir}/", f"{remote_host}:{remote_session_folder}"], check=True)
-
-    # --- Upload Media (to the shared flat input folder to save space/time) ---
-    # We keep media in the base folder so we don't re-upload the same .wav for different sessions
-    media_manifest = "to_upload_manifest.txt"
-    with open(media_manifest, "w") as f:
-        for path in upload_set:
-            f.write(f"{os.path.basename(path)}\n")
-
-    print(f"... Syncing {len(upload_set)} media files to shared input folder")
-
-    try:
-        subprocess.run([
-        "rsync", "-avz", "--ignore-existing", "--no-R",
-        f"--files-from={media_manifest}", 
-        os.path.join(paths_config.audios_path, ""), 
-        f"{remote_host}:{remote_base}"
-        ], capture_output= True, check=True)
-
-        return True
-       
-    except subprocess.CalledProcessError as e:
-        print(f"❌ rsync failed with return code {e.returncode}")
-        if e.stderr:
-            print(f"Error output: {e.stderr.decode()}")
-        return False
-
-    except Exception as e:
-        print(f"💥 Unexpected error during media upload: {e}")
-        return False
-    
-    finally:
-        if os.path.exists(media_manifest):
-            os.remove(media_manifest)
-
+    return True
 
 
 def trigger_parallel_sbatch(session_id, num_chunks):
@@ -215,7 +171,7 @@ def download_parallel_results(session_id, total_videos, local_down_dest = paths_
 
     # --- 3. LOCAL INTEGRITY VERIFICATION ---
     # We expect 2 audio files per video query (1 RAW_MIX + 1 GEN)
-    expected_audio = total_videos * 2
+    expected_audio = total_videos
     
     print(f"🧐 Verifying integrity...")
     if audio_count == expected_audio:
@@ -237,21 +193,17 @@ def download_parallel_results(session_id, total_videos, local_down_dest = paths_
 
 
 
-def run_parallel_tcml_pipeline_continuation(inferred_dict, local_down_dst, timeout_minutes, num_GPU, options = None, auto_download = True):
+def run_parallel_tcml_pipeline_generation(video_list, local_down_dst, timeout_minutes, num_GPU, options = None, auto_download = True):
     if options is None:
         options = {
             "cfg_coef": 3.0,
-            "with_text_descr": True,
-            "prompt_duration": 2,
-            "num_audio_mix": 5,
-            "weight_by": "softmax_score"
         }
 
     # 1. Chunk and Upload
     # (Using the prepare_parallel_batch and upload functions we discussed)
-    local_path, file_set, session_id, num_chunks = prepare_parallel_batch(inferred_dict, num_GPU, options)
+    local_path, session_id, num_chunks = prepare_parallel_batch(video_list, num_GPU, options)
     
-    success = upload_parallel_to_tcml(local_path, file_set, session_id)
+    success = upload_parallel_to_tcml(local_path, session_id)
     
     if success:
         # 2. Trigger Dynamic Array
@@ -263,7 +215,7 @@ def run_parallel_tcml_pipeline_continuation(inferred_dict, local_down_dst, timeo
             download_parallel_results_zipped(
                 session_id=session_id, 
                 local_down_dest=local_down_dst, 
-                total_videos=len(inferred_dict))
+                total_videos=len(video_list))
             
     return session_id
 
@@ -335,7 +287,7 @@ def download_parallel_results_zipped(session_id, total_videos, local_down_dest=p
         os.remove(local_archive_path)
 
     # --- 5. LOCAL INTEGRITY VERIFICATION ---
-    expected_audio = total_videos * 2
+    expected_audio = total_videos 
     print(f"🧐 Verifying integrity...")
     if audio_count == expected_audio:
         print(f"✅ Success! All {audio_count} audio files present and accounted for.")
@@ -406,10 +358,33 @@ def evaluate_generation(
 
 if __name__ == "__main__":
     import pprint
-    from inference import infer_similar_audio_ultra_fast_ultimate, create_inference_example_ultimate
+    from inference import infer_similar_audio_ultra_fast_ultimate
     from experiments import Experiment
     test_vids = [vid for vid in os.listdir(paths_config.test_video_embeddings_path)]
-    my_dict = infer_similar_audio_ultra_fast_ultimate(test_vids[:2], paths_config.test_video_embeddings_path, None, 2, False, 1, 0.01)
 
-    pprint.pp(my_dict, sort_dicts=False)
+    options = {
+            "cfg_coef": 3.0
+        }
+
+    run_parallel_tcml_pipeline_generation(video_list= test_vids, 
+                               local_down_dst= "/home/hossein/Desktop/B.sc.-project/generated_examples_3/", 
+                               timeout_minutes= 8*60,
+                               num_GPU=40,
+                               options= options,
+                               auto_download=False)
+    
+    sessionID = "20260419_182200_469657"
+
+
+    if wait_for_job_completion(sessionID, 40, 60):
+        download_parallel_results_zipped(
+                    session_id=sessionID, 
+                    local_down_dest="/home/hossein/Desktop/B.sc.-project/generated_examples_3/", 
+                    total_videos=len(test_vids))
+        
+    # if wait_for_job_completion(sessionID, 1, 60):
+    #     download_parallel_results_zipped(
+    #                 session_id=sessionID, 
+    #                 local_down_dest="/home/hossein/Desktop/B.sc.-project/generated_examples_test/", 
+    #                 total_videos=10)
                 

@@ -346,7 +346,7 @@ def create_inference_example_ultimate(inference_dict, inference_dir = inferred_e
     print(f"☑️ Inference examples created in {inference_dir}")
 
 
-
+# OLD VERSION (REVERT IF ANYTHING IS BROKEN):
 def evaluate_inference(infer_dict, k_values=[1, 5, 10]):
     total_videos = len(infer_dict)
     ranks = []
@@ -373,73 +373,141 @@ def evaluate_inference(infer_dict, k_values=[1, 5, 10]):
 
     return results
 
+# def evaluate_train_inference(infer_dict, k_values=[1, 5, 10]):
+#     total_videos = len(infer_dict)
+#     ranks = []
+#     margins = []
+#     confidences = []
 
+#     for vid, matches in infer_dict.items():
+#         # Get list of retrieved IDs
+#         match_ids = list(matches.keys())
+        
+#         # If matches is empty for some reason, count as inf and skip
+#         if not match_ids:
+#             ranks.append(float('inf'))
+#             continue
+
+#         # --- 1. RANK & CONFIDENCE ---
+#         if vid in matches:
+#             # GT found within the retrieved top-k
+#             rank = match_ids.index(vid) + 1
+#             ranks.append(rank)
+            
+#             # Record confidence (Softmax) only if GT is present
+#             if 'softmax' in matches[vid]:
+#                 confidences.append(matches[vid]['softmax'])
+#         else:
+#             # GT NOT found in the retrieved top-k
+#             ranks.append(float('inf'))
+
+#         # --- 2. MARGIN (GT vs Distractor) ---
+#         # We can only calculate this if the GT similarity is known (i.e., in matches)
+#         if vid in matches:
+#             sim_gt = matches[vid]['cosine_sim']
+            
+#             if match_ids[0] == vid:
+#                 # Correct Match: GT is Rank 1. Compare with Rank 2.
+#                 if len(match_ids) > 1:
+#                     sim_next = list(matches.values())[1]['cosine_sim']
+#                     margins.append(sim_gt - sim_next)
+#             else:
+#                 # Incorrect Match: GT is in list but Rank > 1. 
+#                 # Compare with the Rank 1 distractor (results in negative margin)
+#                 sim_top_distractor = list(matches.values())[0]['cosine_sim']
+#                 margins.append(sim_gt - sim_top_distractor)
+
+#     # --- 3. AGGREGATE RESULTS ---
+#     valid_ranks = [r for r in ranks if r != float('inf')]
+    
+#     results = {
+#         "Total Videos": float(total_videos),
+#         "MedR": np.median(valid_ranks) if valid_ranks else float('inf'),
+#         "MeanR": np.mean(valid_ranks) if valid_ranks else float('inf'),
+#         "MRR": round(sum(1/r if r != float('inf') else 0 for r in ranks) / total_videos, 4),
+#         "Avg_Margin": round(np.mean(margins), 4) if margins else 0.0,
+#         "Avg_Conf": round(np.mean(confidences), 4) if confidences else 0.0
+#     }
+
+#     # Recall@k calculation
+#     for k in k_values:
+#         recall = sum(1 for r in ranks if r <= k) / total_videos
+#         results[f"Recall@{k}"] = round(recall, 4)
+
+#     return results
+
+# def evaluate_test_inference(infer_dict, original_audio_embeddings):
+#     """
+#     Evaluates retrieval when GT is NOT in the database.
+#     original_audio_embeddings: dict {vid: embedding_vector}
+#     """
+#     semantic_scores = []
+#     coherence_scores = []
+#     alignment_scores = []
+
+#     for vid, matches in infer_dict.items():
+#         # Get the embedding of the audio that SHOULD have been there
+#         gt_audio_emb = original_audio_embeddings[vid]
+        
+#         # 1. Semantic Similarity to GT
+#         match_embs = [m['embedding'] for m in matches.values()] # Assumes you stored embs
+#         sims_to_gt = [cosine_similarity(gt_audio_emb, me) for me in match_embs]
+#         semantic_scores.append(np.mean(sims_to_gt))
+        
+#         # 2. Coherence (Self-Similarity of results)
+#         if len(match_embs) > 1:
+#             # Pairwise similarity between all retrieved audios
+#             self_sims = []
+#             for i in range(len(match_embs)):
+#                 for j in range(i + 1, len(match_embs)):
+#                     self_sims.append(cosine_similarity(match_embs[i], match_embs[j]))
+#             coherence_scores.append(np.mean(self_sims))
+
+#         # 3. Raw Alignment (Video vs retrieved Audio)
+#         raw_sims = [m['cosine_sim'] for m in matches.values()]
+#         alignment_scores.append(np.mean(raw_sims))
+
+#     return {
+#         "Mean Semantic Score": np.mean(semantic_scores),
+#         "Mean Coherence": np.mean(coherence_scores),
+#         "Mean Alignment": np.mean(alignment_scores)
+#     }
 
 if __name__ == "__main__":
-    vids = ["--XInAaMS6k", "-0gYWIOfqdM", "-3M-k4nIYIM", "-4ItJ9yTz_c", "-4o0jRbgHr4", "-4rdRn-FRXo", "-6lkiUAf_cQ", "-6VFTlZsft4"]
    
-    # for vid in vids:
-    #     print(",\n")
-    #     pprint.pp(infer_similar_audio(query= vid, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
-    #     print(",\n")
-
-    # random video
-    # extract_frames_from_video("/home/hossein/Desktop/B.sc.-project/inferred_examples/-0gYWIOfqdM/-0gYWIOfqdM.mp4","/home/hossein/Desktop/randomclip", 5)
-    # extract_video_embedding("/home/hossein/Desktop/randomclip", "/home/hossein/Desktop/rando.npy")
-    # pprint.pp(infer_similar_audio("/home/hossein/Desktop/rando.npy", 5, True,1, 0.01), sort_dicts=False)
-    # pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
-   
-    # videos_training = vggsound_training_videos_generator("vggsound.csv", 3360, 1000, "train")
-    # vggsound_batch_down_trim(videos_training, full_videos_path, trimmed_videos_path, download_and_trim_log_file, clip_length=10)
-    # check_integrity()
     ALL_EMBS_FILES_TUPLE = load_all_normed_embeddings(audio_embeddings_path)
-    # pprint.pp(infer_similar_audio(query= "-0gYWIOfqdM", top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
-    # pprint.pp(infer_similar_audio_fast(query= "-0gYWIOfqdM",all_emb_files_tuple= ALL_EMBS_FILES_TUPLE, top_k=5, single_mode=True, random_sample_count=3, temp= 0.01), sort_dicts=False)
-    # example = infer_similar_audio_ultra_fast(query_lst= ["--XInAaMS6k", "-0gYWIOfqdM", "-3M-k4nIYIM"],all_emb_files_tuple=ALL_EMBS_FILES_TUPLE, top_k=5, random_sample=False, random_sample_count=3, temp= 0.01)
-    # pprint.pp(example, sort_dicts=False)
-    # create_inference_example(example, inference_dir=r"C:\Users\hosse\Desktop\rightNowjustTesting")
 
-    # print(cosine_similarity(np.load(os.path.join(video_embeddings_path, "-3M-k4nIYIM.npy")).squeeze(), 
-    #                         np.load(os.path.join(audio_embeddings_path, "-3M-k4nIYIM.npy")).squeeze()))
-    # print(cosine_similarity(np.load(os.path.join(video_embeddings_path, "-3M-k4nIYIM.npy")).squeeze(), 
-    #                         np.load(os.path.join(audio_embeddings_path, "-9whJW7BUSU.npy")).squeeze()))   
+    test_vids = [vid for vid in os.listdir(paths_config.test_video_embeddings_path)]
+    my_dict = infer_similar_audio_ultra_fast_ultimate(test_vids[:3], paths_config.test_video_embeddings_path, ALL_EMBS_FILES_TUPLE, 3, False, 1, 0.01)
+    pprint.pp()
 
-    # with keep.running():    
-    #     vggsound_extract_audio_from_videos_batch(trimmed_videos_dir= trimmed_videos_path, audios_dir= audios_path, log_file=extract_audio_log_file)
-    #     vggsound_extract_audio_embeddings_batch(audios_dir=audios_path, embeddings_dir= audio_embeddings_path, log_file=embeddings_audio_log_file)
-    #     vggsound_batch_extract_frames_from_vids(trimmed_videos_dir= trimmed_videos_path, frames_dir= video_frames_path)
-    #     vggsound_extract_video_embeddings_batch(frames_dir= video_frames_path, video_embeddings_dir= video_embeddings_path, log_file= video_embeddings_log_file)    
+    options = {
+            "cfg_coef": 0.0,
+            "prompt_duration": 5,
+            "num_audio_mix": 3,
+            "with_text_descr": False,
+            "weight_by": "softmax_score"
+        }
+
+    # run_parallel_tcml_pipeline_continuation(inferred_dict= my_dict, 
+    #                            local_down_dst= "/home/hossein/Desktop/B.sc.-project/generated_examples_4.4/", 
+    #                            timeout_minutes= 8*60,
+    #                            num_GPU=40,
+    #                            options= options,
+    #                            auto_download=False)
     
-    # print("======== Inference and Evaluation ========")
+    sessionID = "20260419_214859_002809"
+                
 
-    # sample_count = 3000
-    # if not all_video_files:
-    #     raise FileNotFoundError("No video embeddings found.")
-    # count = min(sample_count, len(all_video_files))
-    # final_keys = all_video_files[:count]
-    # result = infer_similar_audio_ultra_fast(query_lst=final_keys, 
-    #                                         all_emb_files_tuple=ALL_EMBS_FILES_TUPLE, 
-    #                                         top_k=sample_count, 
-    #                                         random_sample=False, 
-    #                                         random_sample_count=0, 
-    #                                         temp= 0.01)
-    # metrics = evaluate_inference(result, k_values=[1, 5, 10, 50])
-    # print("Evaluation Metrics:")
-    # pprint.pp(metrics, sort_dicts=False)
-    all_video_files = [
-    f for f in os.listdir(video_embeddings_path)
-    if f.endswith(".npy")
-]
-
-    all_video_files.sort(
-        key=lambda f: os.path.getmtime(os.path.join(video_embeddings_path, f)),
-        reverse=True
-    )
-
-    all_video_files = [os.path.splitext(f)[0] for f in all_video_files][:10]
-
-    
-    # pprint.pp(result_old, sort_dicts=False)
-    # pprint.pp(result_ult, sort_dicts=False)
-    # pprint.pp(evaluate_inference(result, k_values=[1, 5, 10]), sort_dicts=False)
-    # create_inference_example(result)
+    # if wait_for_job_completion(sessionID, 40, 60):
+    #     download_parallel_results(
+    #                 session_id=sessionID, 
+    #                 local_down_dest="/home/hossein/Desktop/B.sc.-project/generated_examples/", 
+    #                 total_videos=len(my_dict))
+    # from generation_server import wait_for_job_completion, download_parallel_results_zipped
+        
+    # if wait_for_job_completion(sessionID, 40, 60):
+    #     download_parallel_results_zipped(
+    #                 session_id=sessionID, 
+    #                 local_down_dest="/home/hossein/Desktop/B.sc.-project/generated_examples_4.3/", 
+    #                 total_videos=len(my_dict))
