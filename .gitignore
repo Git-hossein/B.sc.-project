@@ -9,3 +9,4 @@ tcml_exchange/
 sbatch.sbatch
 FirstRun/
 SecondRun/
+.idea/
