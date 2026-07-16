@@ -149,7 +149,7 @@ def check_single_file(vid_path):
         return vid_path.name
     return None
 
-def check_integrity(full_dir= paths_config.full_videos_path, trimmed_dir= paths_config.trimmed_videos_path):
+def check_integrity(full_dir= paths_config.training_full_videos_path, trimmed_dir= paths_config.training_trimmed_videos_path):
     print("🚀 Starting the integrity check...")
     full_path = Path(full_dir)
     trimmed_path = Path(trimmed_dir)

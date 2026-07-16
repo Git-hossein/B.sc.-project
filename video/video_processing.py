@@ -263,17 +263,17 @@ def vggsound_extract_video_embeddings_batch(
 
 
 
-if __name__ == "__main__":
-    from vggsound_processing import download_youtube_video, trim_video
+# if __name__ == "__main__":
+#     from vggsound_processing import download_youtube_video, trim_video
 
     
-    #download_youtube_video("-6VFTlZsft4", "/home/hossein/Desktop/testing/-6VFTlZsft4.mp4") 
-    # trim_video("/home/hossein/Desktop/testing/-6VFTlZsft4.mp4", "/home/hossein/Desktop/testing/-6VFTlZsft4_trim.mp4", 30)
-    # extract_frames_from_video(trimmed_video, "/home/hossein/Desktop/testing/-6VFTlZsft4_frames")
+#     download_youtube_video("-6VFTlZsft4", "/home/hossein/Desktop/testing/-6VFTlZsft4.mp4") 
+#     trim_video("/home/hossein/Desktop/testing/-6VFTlZsft4.mp4", "/home/hossein/Desktop/testing/-6VFTlZsft4_trim.mp4", 30)
+#     extract_frames_from_video(trimmed_video, "/home/hossein/Desktop/testing/-6VFTlZsft4_frames")
 
-    # model, preprocess = clip.load("ViT-B/32", device="cuda" if torch.cuda.is_available() else "cpu")
-    # extract_video_embedding("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4.npy", model, preprocess)
-    # extract_video_embedding_fast("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4_fast.npy", model, preprocess)
-    # extract_video_embedding_safe_fast("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4_safefast.npy", model, preprocess)
+#     model, preprocess = clip.load("ViT-B/32", device="cuda" if torch.cuda.is_available() else "cpu")
+#     extract_video_embedding("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4.npy", model, preprocess)
+#     extract_video_embedding_fast("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4_fast.npy", model, preprocess)
+#     extract_video_embedding_safe_fast("/home/hossein/Desktop/testing/-6VFTlZsft4_frames", "/home/hossein/Desktop/testing/-6VFTlZsft4_safefast.npy", model, preprocess)
 
-    vggsound_batch_extract_frames_from_vids(paths_config.test_trimmed_videos_path, paths_config.test_video_frames_path)
+#     vggsound_batch_extract_frames_from_vids(paths_config.test_trimmed_videos_path, paths_config.test_video_frames_path)
