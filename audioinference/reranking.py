@@ -9,7 +9,9 @@ def sync_rerank(
     retrieval_results: Dict[str, np.ndarray],
     vid_query_sync_dir: str,
     audio_sync_dir_or_dict: Union[str, Dict[str, np.ndarray]],
-    T: float = 1.0,
+    sync_T: float = 1.0,
+    alpha: float = 0.5,           # NEW: 0.0 = pure coarse, 1.0 = pure temporal
+    fusion_T: float = 0.1,        # NEW: low temp to sharpen fusion probabilities
     return_raw: bool = True,
     batch_size: int = 16,
 ) -> Union[Dict[str, np.ndarray], Dict[str, Dict[str, Dict[str, float]]]]:
@@ -23,13 +25,9 @@ def sync_rerank(
     num_queries, k = retrieved_indices.shape
     num_audios = len(retrieved_names)
 
-    # -------------------------------------------------------------
-    # STEP 1: Pre-load candidate pool once (N files instead of Q * K)
-    # -------------------------------------------------------------
+    # ... [STEP 1: Pre-loading remains exactly the same] ...
     print(f"Pre-loading {num_audios} audio temporal embeddings once into RAM...")
     audio_is_dict = isinstance(audio_sync_dir_or_dict, dict)
-    
-    # Load first sample to infer (T, D)
     sample_name = retrieved_names[0]
     if audio_is_dict:
         sample_emb = audio_sync_dir_or_dict.get(sample_name, audio_sync_dir_or_dict[os.path.splitext(sample_name)[0]])
@@ -37,9 +35,7 @@ def sync_rerank(
         sample_emb = np.load(os.path.join(audio_sync_dir_or_dict, add_npy(sample_name)))
     num_frames, feat_dim = np.squeeze(sample_emb).shape
 
-    # Contiguous block: (N, T, D)
     all_audio_matrix = np.empty((num_audios, num_frames, feat_dim), dtype=np.float16)
-
     for idx, name in enumerate(retrieved_names):
         if audio_is_dict:
             emb = audio_sync_dir_or_dict.get(name, audio_sync_dir_or_dict[os.path.splitext(name)[0]])
@@ -55,22 +51,23 @@ def sync_rerank(
     print("Audio embeddings loaded. Starting vectorized re-ranking...")
 
     # -------------------------------------------------------------
-    # STEP 2: Pre-allocate outputs
+    # STEP 2: Pre-allocate outputs (Added fusion arrays)
     # -------------------------------------------------------------
     new_retrieved_indices = np.empty((num_queries, k), dtype=np.int32)
     new_cosine_sim = np.empty((num_queries, k), dtype=np.float32)
     new_softmax_score = np.empty((num_queries, k), dtype=np.float32)
     re_cosine_sim = np.empty((num_queries, k), dtype=np.float32)
     re_softmax_score = np.empty((num_queries, k), dtype=np.float32)
+    fusion_score = np.empty((num_queries, k), dtype=np.float32)            # NEW
+    fusion_softmax_score = np.empty((num_queries, k), dtype=np.float32)    # NEW
 
     # -------------------------------------------------------------
-    # STEP 3: Batch process queries via RAM indexing
+    # STEP 3: Batch process queries
     # -------------------------------------------------------------
     for start_idx in range(0, num_queries, batch_size):
         end_idx = min(start_idx + batch_size, num_queries)
         b_len = end_idx - start_idx
 
-        # Load batch of queries (only B disk reads)
         batch_q = np.empty((b_len, num_frames, feat_dim), dtype=np.float32)
         for i, q_idx in enumerate(range(start_idx, end_idx)):
             q_name = queries[q_idx]
@@ -79,29 +76,48 @@ def sync_rerank(
             q_norm = np.linalg.norm(q_emb, axis=-1, keepdims=True)
             batch_q[i] = q_emb / (q_norm + 1e-9)
 
-        batch_cand_indices = retrieved_indices[start_idx:end_idx]  # Shape: (B, K)
-
-        # In-memory slice: (B, K, T, D)
+        batch_cand_indices = retrieved_indices[start_idx:end_idx]
         batch_cands = all_audio_matrix[batch_cand_indices].astype(np.float32)
-
-        # Vectorized dot product along diagonal
         batch_sim = np.einsum("bktd,btd->bk", batch_cands, batch_q) / float(num_frames)
 
-        # Descending sort
-        sort_order = np.argsort(-batch_sim, axis=-1)
+        # --- NEW: Z-Score Normalization & Alpha Fusion ---
+        batch_coarse = orig_cosine_sim[start_idx:end_idx]
+        
+        mean_c = np.mean(batch_coarse, axis=-1, keepdims=True)
+        std_c = np.std(batch_coarse, axis=-1, keepdims=True)
+        z_coarse = (batch_coarse - mean_c) / (std_c + 1e-6)
+
+        mean_t = np.mean(batch_sim, axis=-1, keepdims=True)
+        std_t = np.std(batch_sim, axis=-1, keepdims=True)
+        z_temp = (batch_sim - mean_t) / (std_t + 1e-6)
+
+        batch_fused = (1.0 - alpha) * z_coarse + alpha * z_temp
+
+        # Sort by the FUSED score instead of pure temporal score
+        sort_order = np.argsort(-batch_fused, axis=-1)
         row_indices = np.arange(b_len)[:, np.newaxis]
 
-        batch_sorted_sim = batch_sim[row_indices, sort_order].astype(np.float32)
-        re_cosine_sim[start_idx:end_idx] = batch_sorted_sim
+        # Reorder everything based on the fusion sort order
+        batch_sorted_fused = batch_fused[row_indices, sort_order].astype(np.float32)
+        batch_sorted_temp = batch_sim[row_indices, sort_order].astype(np.float32)
+
+        fusion_score[start_idx:end_idx] = batch_sorted_fused
+        re_cosine_sim[start_idx:end_idx] = batch_sorted_temp
         new_retrieved_indices[start_idx:end_idx] = batch_cand_indices[row_indices, sort_order]
-        new_cosine_sim[start_idx:end_idx] = orig_cosine_sim[start_idx:end_idx][row_indices, sort_order]
+        new_cosine_sim[start_idx:end_idx] = batch_coarse[row_indices, sort_order]
         new_softmax_score[start_idx:end_idx] = orig_softmax_score[start_idx:end_idx][row_indices, sort_order]
 
-        # Guarded Softmax (Same as slicing function)
-        scores_scaled = batch_sorted_sim / max(T, 1e-6)
-        exps = np.exp(scores_scaled - np.max(scores_scaled, axis=-1, keepdims=True))
-        denom = np.sum(exps, axis=-1, keepdims=True)
-        re_softmax_score[start_idx:end_idx] = (exps / np.maximum(denom, 1e-12)).astype(np.float32)
+        # Guarded Softmax for Temporal
+        scores_scaled_t = batch_sorted_temp / max(sync_T, 1e-6)
+        exps_t = np.exp(scores_scaled_t - np.max(scores_scaled_t, axis=-1, keepdims=True))
+        denom_t = np.sum(exps_t, axis=-1, keepdims=True)
+        re_softmax_score[start_idx:end_idx] = (exps_t / np.maximum(denom_t, 1e-12)).astype(np.float32)
+
+        # Guarded Softmax for Fused Z-Scores
+        scores_scaled_f = batch_sorted_fused / max(fusion_T, 1e-6)
+        exps_f = np.exp(scores_scaled_f - np.max(scores_scaled_f, axis=-1, keepdims=True))
+        denom_f = np.sum(exps_f, axis=-1, keepdims=True)
+        fusion_softmax_score[start_idx:end_idx] = (exps_f / np.maximum(denom_f, 1e-12)).astype(np.float32)
 
     rerank_raw_results = {
         "queries": queries,
@@ -111,23 +127,25 @@ def sync_rerank(
         "softmax_score": new_softmax_score,
         "re_cosine_sim": re_cosine_sim,
         "re_softmax_score": re_softmax_score,
+        "fusion_score": fusion_score,                  # NEW
+        "fusion_softmax_score": fusion_softmax_score,  # NEW
     }
     return rerank_raw_results if return_raw else convert_raw_to_nested_dict(rerank_raw_results)
 
 def slice_down_retrieval_dict(
     raw_results: Dict[str, np.ndarray],
     k: int,
-    T: float = 1.0,
+    T_values: tuple[float, float, float] = (1.0,) * 3,
     return_raw: bool = True,
 ) -> Union[Dict[str, np.ndarray], Dict[str, Dict[str, Dict[str, float]]]]:
     """
     Slices a raw retrieval/re-ranking dict down from current top-K to top-k.
     Preserves 1D metadata arrays, slices all 2D matrices, and then recomputes
-    the softmax distributions across the remaining sliced candidates.
+    the softmax distributions across the remaining sliced candidates using the given Tempreture tupple (allow for different T for each cosine sim).
 
     :param raw_results: Raw dictionary containing (Q, K) matrices.
     :param k: New target number of top candidates (must be <= current K).
-    :param T: Temperature scaling for softmax calculation.
+    :param T: Temperature scalings for softmax calculation. The format should be (og_T, sync_T, fusion_T)
     :param return_raw: If True, returns sliced raw dict; else converts to nested dict.
     :return: Sliced retrieval results in raw or nested format.
     """
@@ -144,21 +162,25 @@ def slice_down_retrieval_dict(
             sliced_results[key] = val
 
     # Helper for in-place, memory-stable softmax recalculation over sliced (Q, target_k)
-    def recompute_softmax(scores: np.ndarray) -> np.ndarray:
+    def recompute_softmax(scores: np.ndarray, temp: float) -> np.ndarray:
         if scores.shape[-1] == 1:
             return np.ones_like(scores, dtype=np.float32)
-        scores_scaled = scores / max(T, 1e-6)
+        scores_scaled = scores / max(temp, 1e-6)
         shifted = scores_scaled - np.max(scores_scaled, axis=-1, keepdims=True)
         exps = np.exp(shifted)
         denom = np.sum(exps, axis=-1, keepdims=True)
         return (exps / np.maximum(denom, 1e-12)).astype(np.float32)
 
-    # 2. Recompute softmaxes on the freshly sliced (Q, target_k) arrays
+    # 2. Recompute softmaxes using their respective temperatures
     if "cosine_sim" in sliced_results:
-        sliced_results["softmax_score"] = recompute_softmax(sliced_results["cosine_sim"])
+        sliced_results["softmax_score"] = recompute_softmax(sliced_results["cosine_sim"], T_values[0])
 
     if "re_cosine_sim" in sliced_results:
-        sliced_results["re_softmax_score"] = recompute_softmax(sliced_results["re_cosine_sim"])
+        sliced_results["re_softmax_score"] = recompute_softmax(sliced_results["re_cosine_sim"], T_values[1])
+        
+    if "fusion_score" in sliced_results:
+        # Pass whatever fusion_T you want to enforce downstream here, e.g., 0.1
+        sliced_results["fusion_softmax_score"] = recompute_softmax(sliced_results["fusion_score"], T_values[2])
 
     return sliced_results if return_raw else convert_raw_to_nested_dict(sliced_results)
 
@@ -171,21 +193,26 @@ def sync_rerank_and_slice(
         vid_query_sync_dir: str,
         audio_sync_dir_or_dict: Union[str, Dict[str, np.ndarray]],
         new_k:int, 
-        T:float, 
-        return_raw:bool
-)-> Dict[str, Dict[str, Dict[str, float]]]:
+        new_og_T: float,
+        new_sync_T: float,
+        new_fusion_T: float, 
+        alpha:float = 0.5, 
+        return_raw:bool=True
+)-> Union[Dict[str, np.ndarray], Dict[str, Dict[str, Dict[str, float]]]]:
 
     reranked = sync_rerank(
         retrieval_results=retrieval_results, 
         vid_query_sync_dir=vid_query_sync_dir, 
         audio_sync_dir_or_dict=audio_sync_dir_or_dict, 
-        T=T, 
+        sync_T=new_sync_T, 
+        alpha=alpha, 
+        fusion_T=new_fusion_T,
         return_raw=True
     )
     return slice_down_retrieval_dict(
         raw_results=reranked, 
         k=new_k, 
-        T=T, 
+        T_values=(new_og_T, new_sync_T, new_fusion_T), 
         return_raw=return_raw
     )
 
