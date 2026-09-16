@@ -10,3 +10,4 @@ sbatch.sbatch
 FirstRun/
 SecondRun/
 .idea/
+inferred_examples/
