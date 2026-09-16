@@ -12,6 +12,8 @@ class _DatasetPaths:
     cav_mae_audio: str
     cav_mae_video_clip: str
     cav_mae_video_frame: str
+    cav_mae_sync_video: str
+    cav_mae_sync_audio: str
     audio_embeddings: str
     video_embeddings: str
     video_embeddings_golden_frame: str
@@ -132,6 +134,16 @@ class _PathSettings:
                                         "cav_mae/video_embeddings/10FrameFrameLevel",
                                     ),
 
+            cav_mae_sync_video=os.path.join(
+                split_path,
+                "cav_mae_sync/video_frame_embeddings",
+            ),
+
+            cav_mae_sync_audio=os.path.join(
+                split_path,
+                "cav_mae_sync/audio_frame_embeddings",
+            ),
+
             audio_embeddings=os.path.join(
                 split_path,
                 "audio_embeddings",
@@ -144,7 +156,7 @@ class _PathSettings:
 
              video_embeddings_golden_frame= os.path.join(
                 split_path,
-                "video_embeddings_golden_frames",
+                "video_embeddings_golden_8frames",
             ),
 
             video_embeddings_attention=
