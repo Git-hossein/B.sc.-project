@@ -83,6 +83,7 @@ class _PathSettings:
         self.validation = self._build_dataset_paths("validation")
         self.test = self._build_dataset_paths("test")
         self.vggsound_path = "./vggsound/vggsound.csv"
+        self.stat_path = "./vggsound/stat.csv"
 
 
     def _build_dataset_paths(self, split: Literal['training', 'test', 'validation']) -> _DatasetPaths:
