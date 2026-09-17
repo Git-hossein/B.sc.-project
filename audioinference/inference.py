@@ -232,7 +232,7 @@ def convert_raw_to_nested_dict(
 
             # Extract every available metric for this match
             query_dict[doc_name] = {
-                metric: float(raw_results[metric][i, rank])
+                metric: round(float(raw_results[metric][i, rank]), 5)
                 for metric in metric_keys
             }
 

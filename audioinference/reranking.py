@@ -123,12 +123,12 @@ def sync_rerank(
         "queries": queries,
         "retrieved_names": retrieved_names,
         "retrieved_indices": new_retrieved_indices,
-        "cosine_sim": new_cosine_sim,
-        "softmax_score": new_softmax_score,
-        "re_cosine_sim": re_cosine_sim,
-        "re_softmax_score": re_softmax_score,
-        "fusion_score": fusion_score,                  # NEW
-        "fusion_softmax_score": fusion_softmax_score,  # NEW
+        "cosine_sim": np.round(new_cosine_sim, 5),
+        "softmax_score": np.round(new_softmax_score, 5),
+        "re_cosine_sim": np.round(re_cosine_sim, 5),
+        "re_softmax_score": np.round(re_softmax_score, 5),
+        "fusion_score": np.round(fusion_score, 5),
+        "fusion_softmax_score": np.round(fusion_softmax_score, 5),
     }
     return rerank_raw_results if return_raw else convert_raw_to_nested_dict(rerank_raw_results)
 
@@ -173,14 +173,13 @@ def slice_down_retrieval_dict(
 
     # 2. Recompute softmaxes using their respective temperatures
     if "cosine_sim" in sliced_results:
-        sliced_results["softmax_score"] = recompute_softmax(sliced_results["cosine_sim"], T_values[0])
+        sliced_results["softmax_score"] = np.round(recompute_softmax(sliced_results["cosine_sim"], T_values[0]), 5)
 
     if "re_cosine_sim" in sliced_results:
-        sliced_results["re_softmax_score"] = recompute_softmax(sliced_results["re_cosine_sim"], T_values[1])
+        sliced_results["re_softmax_score"] = np.round(recompute_softmax(sliced_results["re_cosine_sim"], T_values[1]), 5)
         
     if "fusion_score" in sliced_results:
-        # Pass whatever fusion_T you want to enforce downstream here, e.g., 0.1
-        sliced_results["fusion_softmax_score"] = recompute_softmax(sliced_results["fusion_score"], T_values[2])
+        sliced_results["fusion_softmax_score"] = np.round(recompute_softmax(sliced_results["fusion_score"], T_values[2]), 5)
 
     return sliced_results if return_raw else convert_raw_to_nested_dict(sliced_results)
 
@@ -289,6 +288,67 @@ def evaluate_reranking(
     }
 
 
+def sweep_alpha_offline(
+    coarse_results: Dict[str, np.ndarray],
+    reranked_results: Dict[str, np.ndarray],
+    alphas: list[float] = [0.0, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0],
+    ground_truth_map: Optional[Dict[str, str]] = None,
+):
+    # FIX: Pull ALL arrays from reranked_results so they are perfectly aligned to the same candidate order
+    cand_indices = reranked_results["retrieved_indices"]
+    orig_sim = reranked_results["cosine_sim"]
+    sync_sim = reranked_results["re_cosine_sim"]
+
+    # Compute Z-scores once (shape: Q, K). Mean/Std are permutation invariant!
+    z_c = (orig_sim - orig_sim.mean(axis=-1, keepdims=True)) / (orig_sim.std(axis=-1, keepdims=True) + 1e-6)
+    z_s = (sync_sim - sync_sim.mean(axis=-1, keepdims=True)) / (sync_sim.std(axis=-1, keepdims=True) + 1e-6)
+
+    row_idx = np.arange(len(cand_indices))[:, np.newaxis]
+    
+    # Template dict for re-using evaluate_reranking and evaluate_retrieval_metrics
+    eval_dict = {
+        "queries": coarse_results["queries"],
+        "retrieved_names": coarse_results["retrieved_names"],
+    }
+
+    print(
+        f"{'Alpha':<8} | "
+        f"{'R@1':<10} | "
+        f"{'R@5':<12} | "
+        f"{'R@10':<14} | "
+        f"{'MedR':<16} | "
+        f"{'MRR':<18} | "
+        f"{'Net Gain %':<20} | "
+        f"{'Eviction %':<22}"
+    )
+    print("-" * 135)
+
+    for a in alphas:
+        # 1. Compute new fusion scores
+        fused = (1.0 - a) * z_c + a * z_s
+        
+        # 2. Get the new sort order
+        sort_order = np.argsort(-fused, axis=-1)
+
+        # 3. Apply the sort order to the candidate indices and scores
+        eval_dict["retrieved_indices"] = cand_indices[row_idx, sort_order]
+        eval_dict["cosine_sim"] = orig_sim[row_idx, sort_order]
+
+        # 4. Evaluate
+        metrics = evaluate_retrieval_metrics(eval_dict)
+        # We still compare against coarse_results to get the true eviction rate!
+        dynamics = evaluate_reranking(coarse_results, eval_dict)
+
+        print(
+            f"{a:<8.2f} | "
+            f"{metrics['R@1']:<10.2f} | "
+            f"{metrics['R@5']:<12.2f} | "
+            f"{metrics['R@10']:<14.2f} | "
+            f"{metrics['MedR']:<16.2f} | "
+            f"{metrics['MRR']:<18.2f} | "
+            f"{dynamics['net_top1_gain_pct %']:<20.2f} | "
+            f"{dynamics['eviction_rate_pct %']:<22.2f}"
+        )
 
 
 if __name__ == "__main__":
@@ -299,28 +359,32 @@ if __name__ == "__main__":
 
     print("RERANKING but with clip wav2clip")
 
+    my_queries = os.listdir(paths_config.validation.video_embeddings)[:5]
     myinfer = infer_similar_audio_ultra_fast_ultimate(
-        os.listdir(paths_config.training.video_embeddings)[:5000], 
-        paths_config.training.video_embeddings,
-        load_all_normed_embeddings(paths_config.training.audio_embeddings),
-        50, 
-        False, 
-        5000, 
-        0.01,
-        return_raw=True
+        query_lst= ['Y-qOOR0izlE'], 
+        query_dir= paths_config.test.cav_mae_video_clip,
+        all_emb_dict= load_all_normed_embeddings(paths_config.training.cav_mae_audio),
+        top_k= 50,
+        random_sample = False,
+        random_sample_count = 1,
+        temp= 0.01,
+        return_raw = True
 )
 
     # pprint.pprint(convert_raw_to_nested_dict(myinfer), sort_dicts=False)
-    pprint.pp(evaluate_retrieval_metrics(myinfer))
+    # pprint.pp(evaluate_retrieval_metrics(myinfer))
     print("\n\n\n rerank:\n")
 
-    renranked = sync_rerank(myinfer, paths_config.training.cav_mae_sync_video, paths_config.training.cav_mae_sync_audio, 0.01, return_raw=True)
-    # pprint.pp(convert_raw_to_nested_dict(renranked), sort_dicts=False)
+    renranked = sync_rerank_and_slice(
+        retrieval_results = myinfer, 
+        vid_query_sync_dir= paths_config.test.cav_mae_sync_video, 
+        audio_sync_dir_or_dict =paths_config.training.cav_mae_sync_audio, 
+        new_k= 1,
+        new_og_T=0.01,
+        new_sync_T=0.01,
+        new_fusion_T=0.3,
+        alpha = 0.6,
+        return_raw = False)
 
+    pprint.pp(renranked, sort_dicts=False)
 
-    print("\n\n\n eval:\n")
-
-
-    pprint.pp(evaluate_reranking(myinfer, renranked))
-    print("\n\n")
-    pprint.pp(evaluate_retrieval_metrics(renranked))
