@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 from concurrent.futures import ProcessPoolExecutor
 
+import hear21passt.base
 import numpy as np
 import soundfile as sf
 import torch
@@ -10,7 +11,6 @@ import torch.nn.functional as F
 import torchaudio
 from torch.utils.data import Dataset, DataLoader
 
-from panns_inference import AudioTagging
 from fadtk import FrechetAudioDistance
 from fadtk.model_loader import VGGishModel
 from fadtk.fad_batch import cache_embedding_files
@@ -39,7 +39,6 @@ torchaudio.load = _patched_audio_load
 torchaudio.save = _patched_audio_save
 
 
-
 # ---------------------------------------------------------------------------
 # 1. Parallel File Copy & Peak Normalization
 # ---------------------------------------------------------------------------
@@ -47,7 +46,12 @@ def _process_single_file(args: Tuple[Path, Path, float]) -> None:
     src_file, dst_file, target_peak = args
     if dst_file.exists():
         return
+    
     audio, sr = sf.read(src_file)
+    
+    # Fast-fail assert: Enforce 16kHz on the raw data immediately
+    assert sr == 16000, f"Audio {src_file.name} is {sr} Hz. Expected exactly 16000 Hz."
+    
     max_val = np.max(np.abs(audio))
     if max_val > 1e-6:
         audio = (audio / max_val) * target_peak
@@ -86,7 +90,7 @@ def peak_normalize_and_prep(
             target_dest = raw_path / (file.name[:-12] + ".wav")
             tasks.append((file, target_dest, target_peak))
 
-    # Prepare Ground Truth (ensuring symmetrical volume)
+    # Prepare Ground Truth
     for file in gt_path.glob("*.wav"):
         target_dest = gt_out_path / file.name
         tasks.append((file, target_dest, target_peak))
@@ -120,11 +124,8 @@ class PairedAudioDataset(Dataset):
     def __getitem__(self, idx):
         gen_file, gt_file = self.pairs[idx]
         
-        wav_gen, sr_gen = sf.read(gen_file, dtype="float32")
-        wav_gt, sr_gt = sf.read(gt_file, dtype="float32")
-        
-        if sr_gen != 16000 or sr_gt != 16000:
-            raise ValueError(f"Sample rates must be 16kHz! Got GEN:{sr_gen}, GT:{sr_gt}")
+        wav_gen, _ = sf.read(gen_file, dtype="float32")
+        wav_gt, _ = sf.read(gt_file, dtype="float32")
         
         if wav_gen.ndim > 1:
             wav_gen = np.mean(wav_gen, axis=-1)
@@ -148,9 +149,9 @@ def collate_fn_pad(batch):
 def compute_kl_divergence_batched(
     gen_dir: str, gt_dir: str, device: str, batch_size: int = 16
 ) -> float:
-    at = AudioTagging(checkpoint_path=None, device=device)
-    model = at.model
-    model.eval()
+    
+    model = hear21passt.base.get_basic_model(mode="logits")
+    model.eval().to(device)
 
     dataset = PairedAudioDataset(gen_dir, gt_dir)
     
@@ -164,6 +165,7 @@ def compute_kl_divergence_batched(
         pin_memory=(device == "cuda"),
     )
 
+    # Note: PaSST expects 32kHz audio input to generate its spectrograms properly.
     resampler = torchaudio.transforms.Resample(16000, 32000).to(device)
 
     kl_accum = 0.0
@@ -177,13 +179,14 @@ def compute_kl_divergence_batched(
             b_gen_32k = resampler(b_gen)
             b_gt_32k = resampler(b_gt)
 
-            out_gen = model(b_gen_32k)["clipwise_output"]
-            out_gt = model(b_gt_32k)["clipwise_output"]
+            out_gen = torch.sigmoid(model(b_gen_32k))
+            out_gt = torch.sigmoid(model(b_gt_32k))
 
             p_gen_norm = out_gen / (out_gen.sum(dim=-1, keepdim=True) + 1e-8)
             p_gt_norm = out_gt / (out_gt.sum(dim=-1, keepdim=True) + 1e-8)
 
-            kl_batch = F.kl_div((p_gen_norm + 1e-8).log(), p_gt_norm, reduction="none").sum(dim=-1)
+            # CORRECTED: D_KL(P_gen || P_gt). input=log(target_dist), target=input_dist
+            kl_batch = F.kl_div((p_gt_norm + 1e-8).log(), p_gen_norm, reduction="none").sum(dim=-1)
             
             kl_accum += kl_batch.sum().item()
             total_samples += b_gen.size(0)
@@ -200,7 +203,6 @@ def compute_metrics(gen_dir: str, gt_dir: str, num_workers: int = 4) -> Dict[str
     print("Computing FAD (VGGish)...", flush=True)
     fad_model = VGGishModel()
     
-    # Collect lists of Path objects expected by fadtk
     gt_files = list(Path(gt_dir).glob("*.wav"))
     gen_files = list(Path(gen_dir).glob("*.wav"))
     
@@ -210,7 +212,7 @@ def compute_metrics(gen_dir: str, gt_dir: str, num_workers: int = 4) -> Dict[str
     fad_calc = FrechetAudioDistance(fad_model, audio_load_worker=num_workers, load_model=False)
     fad_score = fad_calc.score(gt_dir, gen_dir)
 
-    print("Computing KL Divergence (PANNs, Batched GPU)...", flush=True)
+    print("Computing KL Divergence (PaSST, Batched GPU)...", flush=True)
     kl_score = compute_kl_divergence_batched(
         gen_dir, gt_dir, device=device, batch_size=16
     )
