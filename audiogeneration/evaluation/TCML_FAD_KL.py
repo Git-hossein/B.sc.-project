@@ -179,9 +179,21 @@ def compute_kl_divergence_batched(
             b_gen_32k = resampler(b_gen)
             b_gt_32k = resampler(b_gt)
 
+            # PaSST strictly expects 10 seconds of audio at 32kHz (320,000 samples).
+            target_length = 320000
+
+            def pad_or_truncate(x, target_len):
+                if x.shape[-1] > target_len:
+                    return x[..., :target_len]
+                elif x.shape[-1] < target_len:
+                    return F.pad(x, (0, target_len - x.shape[-1]))
+                return x
+
+            b_gen_32k = pad_or_truncate(b_gen_32k, target_length)
+            b_gt_32k = pad_or_truncate(b_gt_32k, target_length)
+
             out_gen = torch.sigmoid(model(b_gen_32k))
             out_gt = torch.sigmoid(model(b_gt_32k))
-
             p_gen_norm = out_gen / (out_gen.sum(dim=-1, keepdim=True) + 1e-8)
             p_gt_norm = out_gt / (out_gt.sum(dim=-1, keepdim=True) + 1e-8)
 
@@ -243,16 +255,16 @@ if __name__ == "__main__":
         scratch_gen_dir=scratch_gen,
         scratch_gt_dir=scratch_gt,
         scratch_raw_mix_dir=scratch_raw_mix,
-        num_workers=4,
+        num_workers=8,
     )
 
     print("\n--- Evaluating GEN against Ground Truth ---", flush=True)
-    results_gen = compute_metrics(gen_dir=scratch_gen, gt_dir=scratch_gt, num_workers=4)
+    results_gen = compute_metrics(gen_dir=scratch_gen, gt_dir=scratch_gt, num_workers=8)
     for k, v in results_gen.items():
         print(f"{k}: {v:.4f}")
 
     if scratch_raw_mix:
         print("\n--- Evaluating RAW_MIX against Ground Truth ---", flush=True)
-        results_raw = compute_metrics(gen_dir=scratch_raw_mix, gt_dir=scratch_gt, num_workers=4)
+        results_raw = compute_metrics(gen_dir=scratch_raw_mix, gt_dir=scratch_gt, num_workers=8)
         for k, v in results_raw.items():
             print(f"{k}: {v:.4f}")

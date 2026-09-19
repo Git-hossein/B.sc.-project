@@ -2,15 +2,17 @@
 #SBATCH --job-name=eval_audio
 #SBATCH --partition=day
 #SBATCH --gres=gpu:2080ti:1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --error=job.eval_gen.%A.err
 #SBATCH --output=job.eval_gen.%A.out
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --time=02:00:00
 
 # -------------------------------------------------------------
 # Scratch Directory Setup & Cleanup Trap
 # -------------------------------------------------------------
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export SCRATCH_BASE_DIR="/scratch/${SLURM_JOB_ID}"
 
@@ -26,7 +28,8 @@ trap cleanup EXIT SIGINT SIGTERM
 # -------------------------------------------------------------
 # Input & Evaluation Paths
 # -------------------------------------------------------------
-export SOURCE_FOLDER="/home/sherkat/eval_generation/experiment_audiogen_baseline_01"
+#/home/sherkat/eval_generation/experiment_audiogen_baseline_01
+export SOURCE_FOLDER="/home/sherkat/eval_generation/experiment_audioldm2_comparison_03"
 export GT_FOLDER="/home/sherkat/eval_generation/test_split_GT_audios"
 
 # Uncomment if evaluating RAW_MIX:
