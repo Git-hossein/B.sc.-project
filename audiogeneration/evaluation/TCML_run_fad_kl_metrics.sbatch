@@ -40,4 +40,4 @@ export GT_FOLDER="/home/sherkat/eval_generation/test_split_GT_audios"
 # -------------------------------------------------------------
 cd "$HOME/eval_generation"
 
-uv run python eval_script.py
+uv run python FAD_KL.py

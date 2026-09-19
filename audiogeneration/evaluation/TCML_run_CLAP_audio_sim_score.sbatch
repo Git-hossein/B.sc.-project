@@ -56,4 +56,4 @@ cd "$HOME/eval_generation"
 
 echo "starting CLAP similarity computions..."
 
-uv run python clap_script.py
+uv run python CLAP_audio_similarity.py
