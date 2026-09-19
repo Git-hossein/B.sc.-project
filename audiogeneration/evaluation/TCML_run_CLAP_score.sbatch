@@ -1,10 +1,16 @@
 #!/bin/bash
-#SBATCH ...
-
+#SBATCH --job-name=CLAP_sim_audio
+#SBATCH --partition=day
+#SBATCH --gres=gpu:2080ti:1
+#SBATCH --cpus-per-task=4
+#SBATCH --error=job.clap_gen.%A.err
+#SBATCH --output=job.clap_gen.%A.out
+#SBATCH --mem=16G
+#SBATCH --time=02:00:00
 echo "Preparing scratch folders"
 
-LOCAL_GT_DIR="/path/to/local/gt"
-LOCAL_GEN_DIR="/path/to/local/gen"
+LOCAL_GT_DIR="/home/sherkat/eval_generation/test_split_GT_audios"
+LOCAL_GEN_DIR="/home/sherkat/eval_generation/experiment_audioldm2_ablation_03"
 
 SCRATCH_BASE_DIR="/scratch/${SLURM_JOB_ID}"
 
@@ -44,3 +50,10 @@ if [[ -n "$RAW_MIX" ]]; then
 fi
 
 echo "Scratch preparation complete."
+
+
+cd "$HOME/eval_generation"
+
+echo "starting CLAP similarity computions..."
+
+uv run python clap_script.py

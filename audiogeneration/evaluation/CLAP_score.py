@@ -1,7 +1,8 @@
 import os
 import glob
 import torch
-import torchaudio
+import soundfile as sf
+import scipy.signal
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 from transformers import ClapModel, ClapFeatureExtractor
@@ -93,12 +94,13 @@ class AudioListDataset(Dataset):
         return len(self.paths)
 
     def __getitem__(self, idx):
-        wav, sr = torchaudio.load(self.paths[idx])
-        if wav.shape[0] > 1:
-            wav = wav.mean(dim=0, keepdim=True)
+        wav, sr = sf.read(self.paths[idx], dtype="float32")
+        if wav.ndim > 1:
+            wav = wav.mean(axis=1)
         if sr != 48000:
-            wav = torchaudio.functional.resample(wav, sr, 48000)
-        return wav.squeeze(0).numpy()
+            new_length = round(len(wav) * 48000 / sr)
+            wav = scipy.signal.resample(wav, new_length)
+        return wav
 
 
 MODEL_ID = "laion/clap-htsat-fused"
