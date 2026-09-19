@@ -20,7 +20,6 @@ from fadtk.fad_batch import cache_embedding_files
 # =====================================================================
 def _patched_audio_load(uri, **kwargs):
     wav, sr = sf.read(uri, dtype="float32")
-    # torchaudio expects (channels, time)
     if wav.ndim == 1:
         wav = wav[None, :]
     else:
@@ -28,11 +27,9 @@ def _patched_audio_load(uri, **kwargs):
     return torch.from_numpy(wav), sr
 
 def _patched_audio_save(uri, src, sample_rate, **kwargs):
-    # torchaudio passes (channels, time) tensor
     wav = src.cpu().numpy()
     if wav.ndim == 2:
         wav = wav.T
-    # "PCM_16" is the soundfile equivalent of torchaudio's 16-bit PCM request
     sf.write(uri, wav, sample_rate, subtype="PCM_16")
 
 torchaudio.load = _patched_audio_load
@@ -40,68 +37,70 @@ torchaudio.save = _patched_audio_save
 
 
 # ---------------------------------------------------------------------------
-# 1. Parallel File Copy & Peak Normalization
+# 1. Parallel In-Place Normalization & Renaming
 # ---------------------------------------------------------------------------
-def _process_single_file(args: Tuple[Path, Path, float]) -> None:
-    src_file, dst_file, target_peak = args
-    if dst_file.exists():
+def _process_single_file_in_place(args: Tuple[Path, str, float]) -> None:
+    file_path, suffix_to_remove, target_peak = args
+    if not file_path.exists():
         return
     
-    audio, sr = sf.read(src_file)
+    audio, sr = sf.read(file_path)
     
     # Fast-fail assert: Enforce 16kHz on the raw data immediately
-    assert sr == 16000, f"Audio {src_file.name} is {sr} Hz. Expected exactly 16000 Hz."
+    assert sr == 16000, f"Audio {file_path.name} is {sr} Hz. Expected exactly 16000 Hz."
     
     max_val = np.max(np.abs(audio))
     if max_val > 1e-6:
         audio = (audio / max_val) * target_peak
-    sf.write(dst_file, audio, sr)
+        
+    # If the file has a suffix (like _GEN.wav), remove the suffix so it matches GT names
+    if suffix_to_remove and file_path.name.endswith(suffix_to_remove):
+        new_name = file_path.name.replace(suffix_to_remove, ".wav")
+        new_path = file_path.parent / new_name
+        sf.write(new_path, audio, sr)
+        file_path.unlink() # Delete the old file
+    else:
+        # In-place overwrite (for Ground Truth)
+        sf.write(file_path, audio, sr)
 
 
-def peak_normalize_and_prep(
-    source_dir: str,
-    gt_dir: str,
+def peak_normalize_in_place(
     scratch_gen_dir: str,
     scratch_gt_dir: str,
     scratch_raw_mix_dir: Optional[str] = None,
     target_db: float = -1.0,
-    num_workers: int = 4,
+    num_workers: int = 8,
 ):
-    src_path = Path(source_dir)
-    gt_path = Path(gt_dir)
     gen_path = Path(scratch_gen_dir)
     gt_out_path = Path(scratch_gt_dir)
     raw_path = Path(scratch_raw_mix_dir) if scratch_raw_mix_dir else None
 
-    gen_path.mkdir(parents=True, exist_ok=True)
-    gt_out_path.mkdir(parents=True, exist_ok=True)
-    if raw_path:
-        raw_path.mkdir(parents=True, exist_ok=True)
-
     target_peak = 10.0 ** (target_db / 20.0)
-    tasks: List[Tuple[Path, Path, float]] = []
+    tasks: List[Tuple[Path, str, float]] = []
 
-    # Prepare GEN and RAW_MIX
-    for file in src_path.glob("*.wav"):
-        if file.name.endswith("_GEN.wav"):
-            target_dest = gen_path / (file.name[:-8] + ".wav")
-            tasks.append((file, target_dest, target_peak))
-        elif raw_path and file.name.endswith("_RAW_MIX.wav"):
-            target_dest = raw_path / (file.name[:-12] + ".wav")
-            tasks.append((file, target_dest, target_peak))
+    # 1. Queue GEN files (stripping "_GEN.wav")
+    gen_files = list(gen_path.glob("*_GEN.wav"))
+    for file in gen_files:
+        tasks.append((file, "_GEN.wav", target_peak))
 
-    # Prepare Ground Truth
-    for file in gt_path.glob("*.wav"):
-        target_dest = gt_out_path / file.name
-        tasks.append((file, target_dest, target_peak))
+    # 2. Queue RAW_MIX files (stripping "_RAW_MIX.wav") if they exist
+    if raw_path and raw_path.exists():
+        raw_files = list(raw_path.glob("*_RAW_MIX.wav"))
+        for file in raw_files:
+            tasks.append((file, "_RAW_MIX.wav", target_peak))
+
+    # 3. Queue Ground Truth files (no stripping needed)
+    gt_files = list(gt_out_path.glob("*.wav"))
+    for file in gt_files:
+        tasks.append((file, "", target_peak))
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        list(executor.map(_process_single_file, tasks))
+        list(executor.map(_process_single_file_in_place, tasks))
 
-    print(f"Prepared & normalized: {len(list(gen_path.glob('*.wav')))} _GEN files in {gen_path}", flush=True)
-    print(f"Prepared & normalized: {len(list(gt_out_path.glob('*.wav')))} GT files in {gt_out_path}", flush=True)
-    if raw_path:
-        print(f"Prepared & normalized: {len(list(raw_path.glob('*.wav')))} _RAW_MIX files in {raw_path}", flush=True)
+    print(f"Normalized & Renamed: {len(gen_files)} _GEN files in {gen_path}", flush=True)
+    print(f"Normalized: {len(gt_files)} GT files in {gt_out_path}", flush=True)
+    if raw_path and raw_path.exists():
+        print(f"Normalized & Renamed: {len(raw_files)} _RAW_MIX files in {raw_path}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +154,6 @@ def compute_kl_divergence_batched(
 
     dataset = PairedAudioDataset(gen_dir, gt_dir)
     
-    # num_workers=0 to prevent CUDA context fork error
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -165,7 +163,6 @@ def compute_kl_divergence_batched(
         pin_memory=(device == "cuda"),
     )
 
-    # Note: PaSST expects 32kHz audio input to generate its spectrograms properly.
     resampler = torchaudio.transforms.Resample(16000, 32000).to(device)
 
     kl_accum = 0.0
@@ -197,7 +194,7 @@ def compute_kl_divergence_batched(
             p_gen_norm = out_gen / (out_gen.sum(dim=-1, keepdim=True) + 1e-8)
             p_gt_norm = out_gt / (out_gt.sum(dim=-1, keepdim=True) + 1e-8)
 
-            # CORRECTED: D_KL(P_gen || P_gt). input=log(target_dist), target=input_dist
+            # D_KL(P_gen || P_gt)
             kl_batch = F.kl_div((p_gt_norm + 1e-8).log(), p_gen_norm, reduction="none").sum(dim=-1)
             
             kl_accum += kl_batch.sum().item()
@@ -209,7 +206,7 @@ def compute_kl_divergence_batched(
 # ---------------------------------------------------------------------------
 # 3. Main Evaluation Runner
 # ---------------------------------------------------------------------------
-def compute_metrics(gen_dir: str, gt_dir: str, num_workers: int = 4) -> Dict[str, float]:
+def compute_metrics(gen_dir: str, gt_dir: str, num_workers: int = 8) -> Dict[str, float]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print("Computing FAD (VGGish)...", flush=True)
@@ -236,35 +233,44 @@ def compute_metrics(gen_dir: str, gt_dir: str, num_workers: int = 4) -> Dict[str
 
 
 if __name__ == "__main__":
-    SOURCE_FOLDER = os.environ.get("SOURCE_FOLDER")
-    GT_FOLDER = os.environ.get("GT_FOLDER")
-    SCRATCH_BASE_DIR = os.environ.get("SCRATCH_BASE_DIR")
-    with_raw_mix = os.environ.get("WITH_RAW_MIX")
+    SCRATCH_GT = os.environ.get("SCRATCH_GT")
+    SCRATCH_GEN = os.environ.get("SCRATCH_GEN")
+    SCRATCH_RAW_MIX = os.environ.get("SCRATCH_RAW_MIX")
 
-    if not SOURCE_FOLDER or not GT_FOLDER or not SCRATCH_BASE_DIR:
-        raise ValueError("SOURCE_FOLDER, GT_FOLDER, and SCRATCH_BASE_DIR must be set.")
+    if not SCRATCH_GT or not SCRATCH_GEN:
+        raise ValueError("SCRATCH_GT and SCRATCH_GEN must be set in the environment.")
 
-    scratch_gen = os.path.join(SCRATCH_BASE_DIR, "gen")
-    scratch_gt = os.path.join(SCRATCH_BASE_DIR, "gt")
-    scratch_raw_mix = os.path.join(SCRATCH_BASE_DIR, "raw_mix") if with_raw_mix else None
+    # ---------------------------------------------------------
+    # Sanity Checks & Assertions
+    # ---------------------------------------------------------
+    gen_files_count = len(list(Path(SCRATCH_GEN).glob("*_GEN.wav")))
+    has_raw_mix = False
+    
+    if SCRATCH_RAW_MIX and Path(SCRATCH_RAW_MIX).exists():
+        raw_files_count = len(list(Path(SCRATCH_RAW_MIX).glob("*_RAW_MIX.wav")))
+        if raw_files_count > 0:
+            assert raw_files_count == gen_files_count, (
+                f"Mismatch: Found {raw_files_count} RAW_MIX files, but {gen_files_count} GEN files. "
+                "Ensure both folders are populated evenly."
+            )
+            print(f"Assertion passed: {raw_files_count} RAW_MIX files match {gen_files_count} GEN files.", flush=True)
+            has_raw_mix = True
 
-    print("Preparing and normalizing audio files in parallel...", flush=True)
-    peak_normalize_and_prep(
-        source_dir=SOURCE_FOLDER,
-        gt_dir=GT_FOLDER,
-        scratch_gen_dir=scratch_gen,
-        scratch_gt_dir=scratch_gt,
-        scratch_raw_mix_dir=scratch_raw_mix,
+    print("\nNormalizing audio files in-place on scratch drive...", flush=True)
+    peak_normalize_in_place(
+        scratch_gen_dir=SCRATCH_GEN,
+        scratch_gt_dir=SCRATCH_GT,
+        scratch_raw_mix_dir=SCRATCH_RAW_MIX if has_raw_mix else None,
         num_workers=8,
     )
 
     print("\n--- Evaluating GEN against Ground Truth ---", flush=True)
-    results_gen = compute_metrics(gen_dir=scratch_gen, gt_dir=scratch_gt, num_workers=8)
+    results_gen = compute_metrics(gen_dir=SCRATCH_GEN, gt_dir=SCRATCH_GT, num_workers=8)
     for k, v in results_gen.items():
         print(f"{k}: {v:.4f}")
 
-    if scratch_raw_mix:
+    if has_raw_mix:
         print("\n--- Evaluating RAW_MIX against Ground Truth ---", flush=True)
-        results_raw = compute_metrics(gen_dir=scratch_raw_mix, gt_dir=scratch_gt, num_workers=8)
+        results_raw = compute_metrics(gen_dir=SCRATCH_RAW_MIX, gt_dir=SCRATCH_GT, num_workers=8)
         for k, v in results_raw.items():
             print(f"{k}: {v:.4f}")
