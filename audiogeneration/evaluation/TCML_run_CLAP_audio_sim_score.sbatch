@@ -12,10 +12,10 @@ echo "Preparing scratch folders"
 LOCAL_GT_DIR="/home/sherkat/eval_generation/test_split_GT_audios"
 LOCAL_GEN_DIR="/home/sherkat/eval_generation/experiment_audioldm2_ablation_03"
 
-SCRATCH_BASE_DIR="/scratch/${SLURM_JOB_ID}"
-
+# uncomment to calculate CLAP sim for RAW MIX as well
 export RAW_MIX="1"
 
+SCRATCH_BASE_DIR="/scratch/${SLURM_JOB_ID}"
 SCRATCH_GT="$SCRATCH_BASE_DIR/gt"
 SCRATCH_GEN="$SCRATCH_BASE_DIR/gen"
 SCRATCH_RAW_MIX="$SCRATCH_BASE_DIR/raw_mix"
