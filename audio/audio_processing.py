@@ -84,20 +84,16 @@ def vggsound_extract_audio_embeddings_batch(audios_dir, embeddings_dir, wav2clip
             continue
 
         try:
-            # Load waveform (Wav2CLIP expects raw PCM float32)
             audio_waveform, sr = sf.read(audio_path)
 
-            # If stereo → convert to mono by averaging channels
+            # convert to mono if needed (shouldn't be the case though!)
             if len(audio_waveform.shape) == 2:
                 audio_waveform = audio_waveform.mean(axis=1)
 
-            # Ensure float32
             audio_waveform = audio_waveform.astype(np.float32)
 
-            # Compute embedding
             embedding = wav2clip.embed_audio(audio_waveform, wav2clip_model)
 
-            # Save
             np.save(embedding_path, embedding)
 
             print(f"✔ Embedded audio for {video_id}")
@@ -120,15 +116,12 @@ def process_single_audio(audio_file, audios_dir, embeddings_dir, log_file):
         return None # Skip
 
     try:
-        # Load and Preprocess
+  
         audio_waveform, sr = sf.read(audio_path)
         if len(audio_waveform.shape) == 2:
             audio_waveform = audio_waveform.mean(axis=1)
         audio_waveform = audio_waveform.astype(np.float32)
 
-        # Model is loaded inside the worker or passed via a global-init
-        # For simplicity in CPU tasks, we can initialize it inside the worker 
-        # or use a global variable if using an initializer.
         global worker_model
         if 'worker_model' not in globals():
             worker_model = wav2clip.get_model()
@@ -140,9 +133,7 @@ def process_single_audio(audio_file, audios_dir, embeddings_dir, log_file):
     except Exception as e:
         return (video_id, str(e))
 
-def vggsound_extract_audio_embeddings_parallel(audios_dir, embeddings_dir, log_file=None, num_workers=2):
-    if log_file is None:
-        log_file = paths_config.LOGS_FILENAME # or your default
+def vggsound_extract_audio_embeddings_parallel(audios_dir, embeddings_dir, log_file, num_workers=2):
 
     audio_files = [f for f in os.listdir(audios_dir) if f.endswith(".wav")]
     print(f"🚀 Starting parallel embedding for {len(audio_files)} files using {num_workers or 'all'} cores...")
@@ -155,7 +146,7 @@ def vggsound_extract_audio_embeddings_parallel(audios_dir, embeddings_dir, log_f
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         results = list(executor.map(func, audio_files))
 
-    # Handle Logging after parallel work to avoid file-write collisions
+    # Handle Logging afterwards to avoid collisions
     with open(log_file, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         for res in results:
