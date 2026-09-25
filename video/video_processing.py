@@ -83,7 +83,7 @@ def vggsound_batch_extract_frames_from_vids(trimmed_videos_dir, frames_dir, fps=
 
 
 
-def extract_video_embedding_fast(
+def extract_video_CLIP_embedding(
         input_frame_dir, 
         output_file, 
         model= None, 
@@ -103,20 +103,18 @@ def extract_video_embedding_fast(
         return False
 
     try:
-        # Load all frames into a list first (CPU)
+        # load all frames into a list first on cpu
         frames = [preprocess(Image.open(os.path.join(input_frame_dir, f))) for f in frame_files]
         
-        # Stack into one batch and move to GPU at once
+        # stack into one batch move to gpu
         # shape: [num_frames, 3, 224, 224]
         batch = torch.stack(frames).to(device)
 
         with torch.no_grad():
-            # Process the whole video in one 'gulp'
-            # Note: If you get an 'Out of Memory' error, reduce FPS or process in chunks of 25
             features = model.encode_image(batch)
             features /= features.norm(dim=-1, keepdim=True)
             
-            # Average the embeddings on the GPU
+            # average the frames
             video_emb = features.mean(dim=0)
 
         # Save to disk (np.save overwrites by default)
@@ -129,7 +127,7 @@ def extract_video_embedding_fast(
         return False
 
 
-def vggsound_extract_video_embeddings_batch(
+def vggsound_extract_video_CLIP_embeddings_batch(
         frames_dir, 
         video_embeddings_dir, 
         log_file= paths_config.video_embeddings_log_file, 
@@ -149,21 +147,20 @@ def vggsound_extract_video_embeddings_batch(
     print(f"Loading CLIP model on {device}...")
     model, preprocess = clip.load("ViT-B/32", device=device)
 
-    # List all videos (subfolders)
+
     video_ids = [v for v in os.listdir(frames_dir) if os.path.isdir(os.path.join(frames_dir, v))]
     print(f"Found {len(video_ids)} frame folders (videos) for embedding extraction.")
 
     for vid in video_ids: 
         out_file = os.path.join(video_embeddings_dir, f"{vid}.npy")
         
-        # Skip if embedding already exists
         if os.path.exists(out_file):
             print(f"⏭ Embedding already exists for {vid}, skipping...")
             continue
 
         frame_folder = os.path.join(frames_dir, vid)
 
-        success = extract_video_embedding_fast(frame_folder,out_file, model,preprocess, device)
+        success = extract_video_CLIP_embedding(frame_folder,out_file, model,preprocess, device)
 
         if not success:
             with open(log_file, mode='a', newline='', encoding='utf-8') as f:
