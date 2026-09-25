@@ -146,10 +146,10 @@ E_gt = extract_embeddings(gt_paths, desc="GT Audio")
 print("\nExtracting Generated audio embeddings...")
 E_gen = extract_embeddings(gen_paths, desc="GEN Audio")
 
-# Paired 1-to-1 Cosine similarity
+# paired 1-to-1 cosine sim
 sim_gen_gt = (E_gen * E_gt).sum(dim=-1)
 
-# Shuffled baseline floor (rolls GT index by 1)
+# for comparing against randomly shuffled baseline
 N = E_gt.shape[0]
 sim_random_floor = (E_gen * E_gt[torch.roll(torch.arange(N), shifts=1)]).sum(dim=-1).mean().item() if N > 1 else float("nan")
 

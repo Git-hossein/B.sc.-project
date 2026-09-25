@@ -65,7 +65,7 @@ def prepare_parallel_batch(inferred_dict, retrieved_audios_path, num_GPU, option
         with open(chunk_path, 'w') as f:
             json.dump(chunk, f, indent=4)
 
-    # 4. Build Media Upload Set (same as before, just looking at the whole dict)
+    # 4. Build Media Upload Set 
     upload_set = set()
     for matches in inferred_dict.values():
         for audio_emb in matches.keys():
@@ -82,7 +82,7 @@ def prepare_parallel_batch(inferred_dict, retrieved_audios_path, num_GPU, option
 
 def upload_parallel_to_tcml(local_session_dir, upload_set, retrieved_audios_path, session_id, port):
     remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
-    # We now create a unique path for this specific run
+    # Create a unique path for this specific run
     remote_base = TCML_UPLOAD_DIR
     remote_session_folder = os.path.join(remote_base, session_id)
     
@@ -95,7 +95,7 @@ def upload_parallel_to_tcml(local_session_dir, upload_set, retrieved_audios_path
     subprocess.run(["rsync", "-avz", "-e", f"ssh -p {port}",f"{local_session_dir}/", f"{remote_host}:{remote_session_folder}"], check=True)
 
     # --- Upload Media (to the shared flat input folder to save space/time) ---
-    # We keep media in the base folder so we don't re-upload the same .wav for different sessions
+    # keep media in the base folder so we don't re-upload the same .wav for different sessions
     media_manifest_path = os.path.join(local_session_dir, "to_upload_manifest.txt")
     with open(media_manifest_path, "w") as f:
         for path in upload_set:
@@ -150,7 +150,7 @@ def trigger_parallel_sbatch(sbatch_script_path ,session_id, port, num_chunks):
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode == 0:
-        # Extract the ID using Regex
+        # Extract the ID
         array_job_id = result.stdout.strip()
         print(f"✅ Array Job submitted! ID: {array_job_id}")
         return array_job_id
@@ -184,86 +184,6 @@ def wait_for_job_completion(sentinel_base_dir ,session_id, port, num_chunks, tim
             return False
             
         time.sleep(60)
-
-
-
-def run_parallel_tcml_pipeline_audiocraft_continuation(inferred_dict, retrieved_audios_path, local_down_dst, timeout_minutes, num_GPU, port, options = None, auto_download = True):
-    if options is None:
-        options = {
-            "cfg_coef": 3.0,
-            "with_text_descr": True,
-            "shift": 0.0,
-            "prompt_duration": 2,
-            "num_audio_mix": 5,
-            "weight_by": "softmax_score"
-        }
-
-    # 1. Chunk and Upload
-    # (Using the prepare_parallel_batch and upload functions we discussed)
-    local_path, file_set, session_id, num_chunks = prepare_parallel_batch(inferred_dict, retrieved_audios_path, num_GPU, options)
-    
-    success = upload_parallel_to_tcml(local_path, file_set, retrieved_audios_path, session_id, port)
-    
-    if success:
-        # 2. Trigger Dynamic Array
-        try:
-            job_id = trigger_parallel_sbatch(SBATCH_AUDIOCRAFT_CONTINUATION_PATH ,session_id, port, num_chunks)
-            if job_id is None: 
-                raise Exception(f"job was not properly triggered: job_id = {job_id}")
-            
-            # 3. Wait for all sentinels
-            if auto_download and wait_for_job_completion(AUDIOCRAFT_REMOTE_OUTPUT_DIR, session_id, port, num_chunks, timeout_minutes):
-                
-                download_parallel_results_zipped(
-                    remote_target_dir= AUDIOCRAFT_REMOTE_OUTPUT_DIR,
-                    session_id=session_id, 
-                    port= port,
-                    local_down_dest=local_down_dst, 
-                    total_videos=len(inferred_dict))
-
-        finally:
-            shutil.rmtree(local_path)
-    else:
-        raise Exception(f"❌ Upload failed for session {session_id}")
-
-    return session_id
-
-
-
-
-
-def run_parallel_tcml_pipeline_audioldm2(inferred_dict, retrieved_audios_path, local_down_dst, timeout_minutes, num_GPU, port, options = None, auto_download = True):
-    if options is None:
-        options = {
-        "strength": 0.45,
-        "num_inference_steps": 100,
-        "guidance_scale": 3.0,
-        "with_text_descr": True,
-        "num_audio_mix": 1,
-        "weight_by": "softmax_score"
-        }
-
-    # 1. Chunk and Upload
-    # (Using the prepare_parallel_batch and upload functions we discussed)
-    local_path, file_set, session_id, num_chunks = prepare_parallel_batch(inferred_dict, retrieved_audios_path, num_GPU, options)
-    
-    success = upload_parallel_to_tcml(local_path, file_set,retrieved_audios_path, session_id, port)
-    
-    if success:
-        # 2. Trigger Dynamic Array
-        job_id = trigger_parallel_sbatch(SBATCH_AUDIOLDM2_PATH ,session_id, port, num_chunks)
-        
-        # 3. Wait for all sentinels
-        if auto_download and wait_for_job_completion(AUDIOLDM2_REMOTE_OUTPUT_DIR, session_id, port, num_chunks, timeout_minutes):
-            
-            download_parallel_results_zipped(
-                remote_target_dir= AUDIOLDM2_REMOTE_OUTPUT_DIR,
-                session_id=session_id, 
-                port= port,
-                local_down_dest=local_down_dst, 
-                total_videos=len(inferred_dict))
-            
-    return session_id
 
 
 def download_parallel_results_zipped(remote_target_dir, session_id, port, total_videos, local_down_dest):
@@ -356,78 +276,141 @@ def download_parallel_results_zipped(remote_target_dir, session_id, port, total_
     return local_down_dest
 
 
+def run_parallel_tcml_pipeline_audiocraft_continuation(inferred_dict, 
+                                                       retrieved_audios_path, 
+                                                       local_down_dst, 
+                                                       timeout_minutes, 
+                                                       num_GPU, port, 
+                                                       options = None, 
+                                                       auto_download = True):
+    
+    """Runs the parallel AudioGen continuation pipeline on the TCML remote server.
+
+    Chunks the inference results, uploads necessary configurations and media assets, triggers 
+    a Slurm job array to process audio continuation in parallel across multiple GPUs, 
+    and optionally waits for completion, downloads, and extracts the generated results.
+
+    Args:
+        inferred_dict: Dictionary containing video queries and their retrieved audio matches.
+        retrieved_audios_path: Local directory path containing the retrieved reference audio files.
+        local_down_dst: Local destination directory to save the final downloaded results.
+        timeout_minutes: Maximum duration to wait for remote job completion.
+        num_GPU: Number of GPUs to use for the audiogeneration task (splits the workload into 'num_GPU' many subtasks).
+        port: SSH port for remote connection to the TCML server.
+        options: Dictionary of AudioGen continuation configuration parameters (uses defaults if None).
+        auto_download: If True, automatically waits for task completion and downloads results.
+
+    Returns:
+        The unique session identifier string for this run.
+    """
+    
+    if options is None:
+        options = {
+            "cfg_coef": 3.0,
+            "with_text_descr": True,
+            "shift": 0.0,
+            "prompt_duration": 2,
+            "num_audio_mix": 5,
+            "weight_by": "softmax_score"
+        }
+
+    # 1. Chunk and Upload
+    # (Using the prepare_parallel_batch and upload functions we discussed)
+    local_path, file_set, session_id, num_chunks = prepare_parallel_batch(inferred_dict, retrieved_audios_path, num_GPU, options)
+    
+    success = upload_parallel_to_tcml(local_path, file_set, retrieved_audios_path, session_id, port)
+    
+    if success:
+        # 2. Trigger Dynamic Array
+        try:
+            job_id = trigger_parallel_sbatch(SBATCH_AUDIOCRAFT_CONTINUATION_PATH ,session_id, port, num_chunks)
+            if job_id is None: 
+                raise Exception(f"job was not properly triggered: job_id = {job_id}")
+            
+            # 3. Wait for all sentinels
+            if auto_download and wait_for_job_completion(AUDIOCRAFT_REMOTE_OUTPUT_DIR, session_id, port, num_chunks, timeout_minutes):
+                
+                download_parallel_results_zipped(
+                    remote_target_dir= AUDIOCRAFT_REMOTE_OUTPUT_DIR,
+                    session_id=session_id, 
+                    port= port,
+                    local_down_dest=local_down_dst, 
+                    total_videos=len(inferred_dict))
+
+        finally:
+            shutil.rmtree(local_path)
+    else:
+        raise Exception(f"❌ Upload failed for session {session_id}")
+
+    return session_id
+
+
+
+
+
+def run_parallel_tcml_pipeline_audioldm2(inferred_dict, 
+                                         retrieved_audios_path, 
+                                         local_down_dst, 
+                                         timeout_minutes, 
+                                         num_GPU, port, 
+                                         options = None, 
+                                         auto_download = True):
+
+    """Runs the parallel AudioLDM2 style transfer pipeline on the TCML remote server.
+
+    Chunks the inference results, uploads necessary configurations and media assets, triggers 
+    a Slurm job array to process audio-to-audio generation and style transfer in parallel 
+    across multiple GPUs, and optionally waits for completion, downloads, and extracts the results.
+
+    Args:
+        inferred_dict: Dictionary containing video queries and their retrieved audio matches.
+        retrieved_audios_path: Local directory path containing the retrieved reference audio files.
+        local_down_dst: Local destination directory to save the final downloaded results.
+        timeout_minutes: Maximum duration to wait for remote job completion.
+        num_GPU: Number of GPUs to use for the audiogeneration task (splits the workload into 'num_GPU' many subtasks).
+        port: SSH port for remote connection to the TCML server.
+        options: Dictionary of AudioLDM2 configuration parameters (uses defaults if None).
+        auto_download: If True, automatically waits for task completion and downloads results.
+
+    Returns:
+        The unique session identifier string for this run.
+    """
+
+    if options is None:
+        options = {
+        "strength": 0.45,
+        "num_inference_steps": 100,
+        "guidance_scale": 3.0,
+        "with_text_descr": True,
+        "num_audio_mix": 1,
+        "weight_by": "softmax_score"
+        }
+
+    # 1. Chunk and Upload
+    # (Using the prepare_parallel_batch and upload functions we discussed)
+    local_path, file_set, session_id, num_chunks = prepare_parallel_batch(inferred_dict, retrieved_audios_path, num_GPU, options)
+    
+    success = upload_parallel_to_tcml(local_path, file_set,retrieved_audios_path, session_id, port)
+    
+    if success:
+        # 2. Trigger Dynamic Array
+        job_id = trigger_parallel_sbatch(SBATCH_AUDIOLDM2_PATH ,session_id, port, num_chunks)
+        
+        # 3. Wait for all sentinels
+        if auto_download and wait_for_job_completion(AUDIOLDM2_REMOTE_OUTPUT_DIR, session_id, port, num_chunks, timeout_minutes):
+            
+            download_parallel_results_zipped(
+                remote_target_dir= AUDIOLDM2_REMOTE_OUTPUT_DIR,
+                session_id=session_id, 
+                port= port,
+                local_down_dest=local_down_dst, 
+                total_videos=len(inferred_dict))
+            
+    return session_id
+
 
 
 
 
 if __name__ == "__main__":
-#     search_results = {'-jxXv_SoNaI.npy': {'13wjsR-VT_o.npy': {'softmax_score': 0.5259811878204346,
-#                                          'cosine_sim': 0.18692833185195923},
-#                      '0q53YxUMkKw.npy': {'softmax_score': 0.3016546666622162,
-#                                          'cosine_sim': 0.18136849999427795},
-#                      '-BAKe6QGTUk.npy': {'softmax_score': 0.17236416041851044,
-#                                          'cosine_sim': 0.17577175796031952}},
-#  '-0gYWIOfqdM.npy': {'-0gYWIOfqdM.npy': {'softmax_score': 0.505824089050293,
-#                                          'cosine_sim': 0.1723942756652832},
-#                      '-4yCSY_5Zns.npy': {'softmax_score': 0.2697280943393707,
-#                                          'cosine_sim': 0.16610652208328247},
-#                      '25hXjUt-XBY.npy': {'softmax_score': 0.22444778680801392,
-#                                          'cosine_sim': 0.16426882147789001}}}
-#     run_parallel_tcml_pipeline_audioldm2(search_results, "/home/hossein/Desktop/test_now", 60, 2, REMOTE_PORT, None, True)
-    print("at the right place buckoooo....")
-
-    # from audioinference.inference import infer_similar_audio_ultra_fast_ultimate, load_all_normed_embeddings
-    # from audioinference.reranking import sync_rerank_and_slice, convert_raw_to_nested_dict, evaluate_reranking
-    # from audioinference.evaluation import evaluate_retrieval_metrics
-
-
-
-    # my_queries = os.listdir(paths_config.test.cav_mae_video_clip)
-    # myinferdict = infer_similar_audio_ultra_fast_ultimate(my_queries, 
-    #                                                       paths_config.test.cav_mae_video_clip, 
-    #                                                       load_all_normed_embeddings(paths_config.training.cav_mae_audio), 
-    #                                                       50, 
-    #                                                       False, 
-    #                                                       0, 
-    #                                                       0.01,
-    #                                                       return_raw=True) 
-
-
-
-    # reranked_inferdict= sync_rerank_and_slice(myinferdict, 
-    #                                           paths_config.test.cav_mae_sync_video, 
-    #                                           paths_config.training.cav_mae_sync_audio, 
-    #                                           1, 
-    #                                           0.01, 
-    #                                           return_raw=False)
-
-
-
-    # audioldm2_options=   {
-    #     "strength": 0.7,
-    #     "num_inference_steps": 100,
-    #     "guidance_scale": 3.0,
-    #     "with_text_descr": True,
-    #     "negative_prompt": "low quality, distorted, noisy, glitch",
-    #     "num_audio_mix": 1,
-    #     "weight_by": "re_softmax_score"
-    #     }
-
-
-    # run_parallel_tcml_pipeline_audioldm2(inferred_dict=reranked_inferdict,
-    #                                      retrieved_audios_path=paths_config.training.audios,
-    #                                      local_down_dst="/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/experiments/unseen/experiment_audioldm2_ablation_03",
-    #                                      timeout_minutes=240,
-    #                                      num_GPU=30,
-    #                                      port=REMOTE_PORT,
-    #                                      options=audioldm2_options,
-    #                                      auto_download=False)
-
-
-    wait_for_job_completion(AUDIOLDM2_REMOTE_OUTPUT_DIR, "20260916_124952_579623", LOCAL_PORT, 30, 120)
-    download_parallel_results_zipped(
-                remote_target_dir= AUDIOLDM2_REMOTE_OUTPUT_DIR,
-                session_id="20260916_124952_579623", 
-                port= LOCAL_PORT,
-                local_down_dest="/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/experiments/unseen/experiment_audioldm2_ablation_03", 
-                total_videos=len(os.listdir(paths_config.test.audios)))
+    pass

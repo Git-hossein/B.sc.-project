@@ -46,19 +46,18 @@ def _process_single_file_in_place(args: Tuple[Path, str, float]) -> None:
     
     audio, sr = sf.read(file_path)
     
-    # Fast-fail assert: Enforce 16kHz on the raw data immediately
     assert sr == 16000, f"Audio {file_path.name} is {sr} Hz. Expected exactly 16000 Hz."
     
     max_val = np.max(np.abs(audio))
     if max_val > 1e-6:
         audio = (audio / max_val) * target_peak
         
-    # If the file has a suffix (like _GEN.wav), remove the suffix so it matches GT names
+    # remove suffix's like _GEN.wav and _RAW_MIX.wav
     if suffix_to_remove and file_path.name.endswith(suffix_to_remove):
         new_name = file_path.name.replace(suffix_to_remove, ".wav")
         new_path = file_path.parent / new_name
         sf.write(new_path, audio, sr)
-        file_path.unlink() # Delete the old file
+        file_path.unlink()
     else:
         # In-place overwrite (for Ground Truth)
         sf.write(file_path, audio, sr)
@@ -104,7 +103,7 @@ def peak_normalize_in_place(
 
 
 # ---------------------------------------------------------------------------
-# 2. Fast Batched Audio Dataset & Loader for KL Divergence
+# 2. BAtCHED Audio Dataset and Loader for KL Divergence
 # ---------------------------------------------------------------------------
 class PairedAudioDataset(Dataset):
     def __init__(self, gen_dir: str, gt_dir: str):
@@ -176,7 +175,6 @@ def compute_kl_divergence_batched(
             b_gen_32k = resampler(b_gen)
             b_gt_32k = resampler(b_gt)
 
-            # PaSST strictly expects 10 seconds of audio at 32kHz (320,000 samples).
             target_length = 320000
 
             def pad_or_truncate(x, target_len):

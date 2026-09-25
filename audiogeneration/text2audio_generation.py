@@ -72,7 +72,7 @@ def prepare_parallel_batch(vid_list, num_GPU, options):
 
 def upload_parallel_to_tcml(local_session_dir, session_id, port):
     remote_host = "sherkat@login3.tcml.uni-tuebingen.de"
-    # We now create a unique path for this specific run
+    # create a unique path for this specific run
     remote_base = TCML_UPLOAD_DIR
     remote_session_folder = os.path.join(remote_base, session_id)
     
@@ -81,7 +81,6 @@ def upload_parallel_to_tcml(local_session_dir, session_id, port):
 
     # --- Upload Chunks and Config ---
     print("... Uploading JSON chunks and config")
-    # Using '/*' to send the contents of the local folder to the remote session folder
     subprocess.run(["rsync", "-avz", "-e", f"ssh -p {port}", os.path.join(local_session_dir, ""), f"{remote_host}:{remote_session_folder}"], check=True)
     return True
 
@@ -106,7 +105,7 @@ def trigger_parallel_sbatch(sbatch_script_path, session_id, port, num_chunks):
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode == 0:
-        # Extract the ID using Regex
+        # Extract the ID
         array_job_id = result.stdout.strip()
         print(f"✅ Array Job submitted! ID: {array_job_id}")
         return array_job_id
@@ -140,120 +139,6 @@ def wait_for_job_completion(sentinel_base_dir, session_id, port, num_chunks, tim
             return False
             
         time.sleep(60)
-
-
-
-def run_parallel_tcml_pipeline_audioldm2_pure_generation(
-    video_list, 
-    local_down_dst, 
-    timeout_minutes, 
-    num_GPU, 
-    port, 
-    options=None, 
-    auto_download=True
-):
-    """
-    Orchestrates pure text-to-audio parallel generation for AudioLDM2 across TCML nodes.
-    Prepares chunks, uploads session config, triggers Slurm array, monitors completion,
-    and downloads/verifies generated audio files.
-    """
-    if options is None:
-        options = {
-            "negative_prompt": "low quality, distorted, noisy, glitch",
-            "num_inference_steps": 100,
-            "guidance_scale": 3.5,
-            "audio_length_in_s": 10.0,
-            "seed": 42
-        }
-
-    # 1. Chunk and Upload Session Data
-    local_path, session_id, num_chunks = prepare_parallel_batch(video_list, num_GPU, options)
-    
-    success = upload_parallel_to_tcml(local_path, session_id, port)
-    
-    if not success:
-        shutil.rmtree(local_path, ignore_errors=True)
-        raise RuntimeError(f"❌ Upload failed for session {session_id}")
-
-    try:
-        # 2. Trigger Dynamic Slurm Array
-        job_id = trigger_parallel_sbatch(
-            sbatch_script_path=SBATCH_AUDIOLDM2_GENERATION_PATH,
-            session_id=session_id,
-            port=port,
-            num_chunks=num_chunks
-        )
-        if job_id is None:
-            raise RuntimeError(f"❌ Slurm job array was not properly triggered (job_id: {job_id})")
-
-        # 3. Monitor Sentinel Files and Download
-        if auto_download:
-            job_finished = wait_for_job_completion(
-                sentinel_base_dir=AUDIOLDM2_REMOTE_OUTPUT_DIR,
-                session_id=session_id,
-                port=port,
-                num_chunks=num_chunks,
-                timeout_minutes=timeout_minutes
-            )
-
-            if job_finished:
-                download_parallel_results_zipped(
-                    remote_target_dir=AUDIOLDM2_REMOTE_OUTPUT_DIR,
-                    session_id=session_id,
-                    port=port,
-                    total_videos=len(video_list),
-                    local_down_dest=local_down_dst
-                )
-            else:
-                raise TimeoutError(
-                    f"⏰ Generation timed out after {timeout_minutes} minutes. "
-                    f"Session results not auto-downloaded: {session_id}"
-                )
-    finally:
-        # 4. Clean up local preparation folder
-        if os.path.exists(local_path):
-            shutil.rmtree(local_path)
-
-    return session_id
-
-
-def run_parallel_tcml_pipeline_audiocraft_generation(video_list, local_down_dst, timeout_minutes, num_GPU, port, options = None, auto_download = True):
-    if options is None:
-        options = {
-            "cfg_coef": 3.0,
-        }
-
-    # 1. Chunk and Upload
-    # (Using the prepare_parallel_batch and upload functions we discussed)
-    local_path, session_id, num_chunks = prepare_parallel_batch(video_list, num_GPU, options)
-    
-    success = upload_parallel_to_tcml(local_path, session_id, port)
-    
-    if success:
-        try:
-            # 2. Trigger Dynamic Array
-            job_id = trigger_parallel_sbatch(SBATCH_AUDIOCRAFT_GENERATION_PATH, session_id, port, num_chunks)
-            if job_id is None: 
-                raise Exception(f"Slurm job array was not properly triggered : job_id = {job_id}")
-            
-            # 3. Wait for all sentinels
-            if auto_download and wait_for_job_completion(AUDIOCRAFT_REMOTE_OUTPUT_DIR, session_id, port, num_chunks, timeout_minutes):
-                
-                download_parallel_results_zipped(
-                    AUDIOCRAFT_REMOTE_OUTPUT_DIR,
-                    session_id, 
-                    port,
-                    local_down_dest=local_down_dst, 
-                    total_videos=len(video_list))
-        finally:
-            shutil.rmtree(local_path)
-
-    else:
-        shutil.rmtree(local_path, ignore_errors=True)
-        raise Exception(f"❌ Upload failed for session {session_id}")
-            
-    return session_id
-
 
 
 def download_parallel_results_zipped(remote_target_dir, session_id, port, total_videos, local_down_dest):
@@ -332,7 +217,7 @@ def download_parallel_results_zipped(remote_target_dir, session_id, port, total_
             )
     finally:
         # --- 6. FINAL CLEANUP ---
-        # Remove DONE_ sentinels (Identical to legacy cleanup)
+        # Remove DONE_ sentinels
         if os.path.exists(local_down_dest):
             for sentinel in [f for f in os.listdir(local_down_dest) if f.startswith("DONE_")]:
                 os.remove(os.path.join(local_down_dest, sentinel))
@@ -349,49 +234,157 @@ def download_parallel_results_zipped(remote_target_dir, session_id, port, total_
     return local_down_dest
 
 
+def run_parallel_tcml_pipeline_audioldm2_pure_generation(
+    video_list, 
+    local_down_dst, 
+    timeout_minutes, 
+    num_GPU, 
+    port, 
+    options=None, 
+    auto_download=True
+):
+    """Orchestrates pure text-to-audio parallel generation for AudioLDM2 on the TCML server.
+
+    Chunks the video list, uploads session configurations, triggers a Slurm job array 
+    for parallel generation across multiple GPUs, and optionally monitors completion, 
+    downloads, and verifies the generated audio files.
+
+    Args:
+        video_list: List of vggsound videos to generate audio for.
+        local_down_dst: Local destination directory to save the final downloaded results.
+        timeout_minutes: Maximum duration to wait for remote job completion.
+        num_GPU: Number of GPUs to use for the audiogeneration task (splits the workload into 'num_GPU' many subtasks).
+        port: SSH port for remote connection to the TCML server.
+        options: Dictionary of AudioLDM2 generation configuration parameters (uses defaults if None).
+        auto_download: If True, automatically waits for task completion and downloads results.
+
+    Returns:
+        The unique session identifier string for this run.
+    """
+
+    if options is None:
+        options = {
+            "negative_prompt": "low quality, distorted, noisy, glitch",
+            "num_inference_steps": 100,
+            "guidance_scale": 3.5,
+            "audio_length_in_s": 10.0,
+            "seed": 42
+        }
+
+    # 1. Chunk and Upload Session Data
+    local_path, session_id, num_chunks = prepare_parallel_batch(video_list, num_GPU, options)
+    
+    success = upload_parallel_to_tcml(local_path, session_id, port)
+    
+    if not success:
+        shutil.rmtree(local_path, ignore_errors=True)
+        raise RuntimeError(f"❌ Upload failed for session {session_id}")
+
+    try:
+        # 2. Trigger Dynamic Slurm Array
+        job_id = trigger_parallel_sbatch(
+            sbatch_script_path=SBATCH_AUDIOLDM2_GENERATION_PATH,
+            session_id=session_id,
+            port=port,
+            num_chunks=num_chunks
+        )
+        if job_id is None:
+            raise RuntimeError(f"❌ Slurm job array was not properly triggered (job_id: {job_id})")
+
+        # 3. Monitor Sentinel Files and Download
+        if auto_download:
+            job_finished = wait_for_job_completion(
+                sentinel_base_dir=AUDIOLDM2_REMOTE_OUTPUT_DIR,
+                session_id=session_id,
+                port=port,
+                num_chunks=num_chunks,
+                timeout_minutes=timeout_minutes
+            )
+
+            if job_finished:
+                download_parallel_results_zipped(
+                    remote_target_dir=AUDIOLDM2_REMOTE_OUTPUT_DIR,
+                    session_id=session_id,
+                    port=port,
+                    total_videos=len(video_list),
+                    local_down_dest=local_down_dst
+                )
+            else:
+                raise TimeoutError(
+                    f"⏰ Generation timed out after {timeout_minutes} minutes. "
+                    f"Session results not auto-downloaded: {session_id}"
+                )
+    finally:
+        # 4. Clean up local preparation folder
+        if os.path.exists(local_path):
+            shutil.rmtree(local_path)
+
+    return session_id
+
+
+def run_parallel_tcml_pipeline_audiocraft_generation(
+    video_list, 
+    local_down_dst, 
+    timeout_minutes, 
+    num_GPU, port, 
+    options = None, 
+    auto_download = True
+):
+    """Orchestrates pure text-to-audio parallel generation for AudioCraft on the TCML server.
+
+    Chunks the video list, uploads session configurations, triggers a Slurm job array 
+    for parallel generation across multiple GPUs, and optionally monitors completion, 
+    downloads, and verifies the generated audio files.
+
+    Args:
+        video_list: List of vggsound videos to generate audio for.
+        local_down_dst: Local destination directory to save the final downloaded results.
+        timeout_minutes: Maximum duration to wait for remote job completion.
+        num_GPU: Number of GPUs to use for the audiogeneration task (splits the workload into 'num_GPU' many subtasks).
+        port: SSH port for remote connection to the TCML server.
+        options: Dictionary of AudioCraft generation configuration parameters (uses defaults if None).
+        auto_download: If True, automatically waits for task completion and downloads results.
+
+    Returns:
+        The unique session identifier string for this run.
+    """
+
+    if options is None:
+        options = {
+            "cfg_coef": 3.0,
+        }
+
+    # 1. Chunk and Upload
+    # (Using the prepare_parallel_batch and upload functions we discussed)
+    local_path, session_id, num_chunks = prepare_parallel_batch(video_list, num_GPU, options)
+    
+    success = upload_parallel_to_tcml(local_path, session_id, port)
+    
+    if success:
+        try:
+            # 2. Trigger Dynamic Array
+            job_id = trigger_parallel_sbatch(SBATCH_AUDIOCRAFT_GENERATION_PATH, session_id, port, num_chunks)
+            if job_id is None: 
+                raise Exception(f"Slurm job array was not properly triggered : job_id = {job_id}")
+            
+            # 3. Wait for all sentinels
+            if auto_download and wait_for_job_completion(AUDIOCRAFT_REMOTE_OUTPUT_DIR, session_id, port, num_chunks, timeout_minutes):
+                
+                download_parallel_results_zipped(
+                    AUDIOCRAFT_REMOTE_OUTPUT_DIR,
+                    session_id, 
+                    port,
+                    local_down_dest=local_down_dst, 
+                    total_videos=len(video_list))
+        finally:
+            shutil.rmtree(local_path)
+
+    else:
+        shutil.rmtree(local_path, ignore_errors=True)
+        raise Exception(f"❌ Upload failed for session {session_id}")
+            
+    return session_id
+
 
 if __name__ == "__main__":
-    print("we're here")
-    from audioinference.inference import infer_similar_audio_ultra_fast_ultimate, load_all_normed_embeddings
-    from audioinference.reranking import sync_rerank_and_slice
-
-
-
-
-    my_queries = os.listdir(paths_config.test.cav_mae_video_clip)
-
-
-    # audioldm2_options = {
-    #         "negative_prompt": "low quality, distorted, noisy, glitch",
-    #         "num_inference_steps": 100,
-    #         "guidance_scale": 3.5,
-    #         "audio_length_in_s": 10.0,
-    #         "seed": 42
-    #     }
-
-    # run_parallel_tcml_pipeline_audioldm2_generation(
-    #     video_list=my_queries,
-    #     local_down_dst="/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/experiments/unseen/experiment_audioldm2_baseline_01",
-    #     timeout_minutes=120,
-    #     num_GPU=30,
-    #     port=REMOTE_PORT,
-    #     options=audioldm2_options,
-    #     auto_download=False
-    # )
-
-    job_finished = wait_for_job_completion(
-                    sentinel_base_dir=AUDIOLDM2_REMOTE_OUTPUT_DIR,
-                    session_id="20260916_115448_883672",
-                    port=LOCAL_PORT,
-                    num_chunks=30,
-                    timeout_minutes=120
-                )
-    
-    if job_finished:
-        download_parallel_results_zipped(
-            remote_target_dir=AUDIOLDM2_REMOTE_OUTPUT_DIR,
-            session_id="20260916_115448_883672",
-            port=LOCAL_PORT,
-            total_videos=len(my_queries),
-            local_down_dest="/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/experiments/unseen/experiment_audioldm2_baseline_01"
-        )
+    pass

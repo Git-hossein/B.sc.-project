@@ -76,12 +76,10 @@ def compute_aa_alignment(
         - optimal_offset_sec (float): Best temporal shift in seconds within the tolerance window.
         - max_corr (float): Pearson correlation at optimal offset [-1.0, 1.0].
     """
-    # 1. Load and resample audio
     sr_shared = 22050
     y_gen, _ = _load_mono(audio_path_gen, target_sr=sr_shared)
     y_gt, _ = _load_mono(audio_path_gt, target_sr=sr_shared)
 
-    # 2. Match durations
     min_len = min(len(y_gen), len(y_gt))
     if min_len == 0:
         return (0.0, 0.0, 0.0) if return_offset else 0.0
@@ -89,22 +87,18 @@ def compute_aa_alignment(
     y_gen = y_gen[:min_len]
     y_gt = y_gt[:min_len]
 
-    # 3. Compute onset envelopes (spectral flux)
     env_gen = _compute_onset_envelope(y_gen, sr=sr_shared, fps=fps)
     env_gt = _compute_onset_envelope(y_gt, sr=sr_shared, fps=fps)
 
-    # Match frame lengths
     min_frames = min(len(env_gen), len(env_gt))
     env_gen = env_gen[:min_frames]
     env_gt = env_gt[:min_frames]
 
-    # 4. Temporal smoothing (allows slight sub-100ms tolerance for diffusion jitter)
     sigma_frames = smooth_sigma_sec * fps
     if sigma_frames > 0:
         env_gen = gaussian_filter1d(env_gen, sigma=sigma_frames)
         env_gt = gaussian_filter1d(env_gt, sigma=sigma_frames)
 
-    # 5. Standardize (zero-mean, unit-variance)
     std_gen = np.std(env_gen)
     std_gt = np.std(env_gt)
 
@@ -121,11 +115,9 @@ def compute_aa_alignment(
     if not return_offset:
         return sync_0
 
-    # 7. Cross-correlation across all time lags
     cross_corr = np.correlate(norm_gen, norm_gt, mode='full') / len(norm_gen)
     lags = np.arange(-len(norm_gen) + 1, len(norm_gen))
 
-    # 8. Windowing: Constrain search to +/- max_tolerance_sec
     max_lag_frames = int(max_tolerance_sec * fps)
     center_idx = len(norm_gen) - 1
 
