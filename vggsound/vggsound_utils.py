@@ -35,14 +35,4 @@ def get_label_category_lookup():
 
 
 if __name__=="__main__":
-    my_dict = get_vid_label_lookup('test')
-    my_labes = get_label_category_lookup()
-
-    video_ids = set(my_dict.keys())
-    dict_labels = set(my_dict.values())
-    labels = set(my_labes.keys())
-
-
-    assert dict_labels == labels
-    assert len(my_dict) == len(video_ids)
-    assert len(my_labes) == len(labels)
+    pass

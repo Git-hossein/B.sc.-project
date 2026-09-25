@@ -8,7 +8,6 @@ import yt_dlp
 from wakepy import keep
 from path_settings import paths_config
 
-# A lock to prevent multiple threads from writing to the log file at the same time
 log_lock = threading.Lock()
 
 def vggsound_training_videos_generator(
@@ -45,8 +44,7 @@ def download_youtube_video_stable(video_id, output_path):
             'retries': 10,
             'fragment_retries': 10,
             'continuedl': True,
-            # Crucial for parallel: hide progress bars so the terminal doesn't glitch out
-            'quiet': True,
+            'quiet': True, # disable progress bar
             'noprogress': True, 
         }
         try:
@@ -87,17 +85,13 @@ def process_single_video_p_stable(video_info, full_videos_path, trimmed_videos_p
     full_file = os.path.join(full_videos_path, f"{video_id}_full.mp4")
     trim_file = os.path.join(trimmed_videos_path, f"{video_id}.mp4")
     
-    # 1. Download the FULL video
     dl_success = download_youtube_video_stable(video_id, full_file)
 
-    # 2. Trim from the actual start_sec (not 0)
     trim_success = False
     if dl_success:
         trim_success = trim_video_stable(full_file, trim_file, start_sec, clip_length)
 
 
-
-    # 4. Thread-safe Logging
     if not dl_success or not trim_success:
         with log_lock:
             with open(log_file, mode='a', newline='', encoding='utf-8') as f:
@@ -110,7 +104,7 @@ def process_single_video_p_stable(video_info, full_videos_path, trimmed_videos_p
     else:
         print(f"✅ Successfully processed {video_id}")
 
-# @keep.running (if you are using a custom decorator, keep it here)
+# @keep.running
 def vggsound_batch_down_trim_parallel_stable(video_list, full_videos_path, trimmed_videos_path, log_file, clip_length=10, max_workers=3):
     """Runs the stable pipeline concurrently."""
     os.makedirs(full_videos_path, exist_ok=True)
@@ -131,31 +125,9 @@ def vggsound_batch_down_trim_parallel_stable(video_list, full_videos_path, trimm
         for future in futures:
             future.result()
 
-# --- HOW TO CALL IT ---
+
 
 
 if __name__ == "__main__":
-    from audio.audio_processing import vggsound_extract_audio_embeddings_batch, vggsound_extract_audio_from_videos_batch
-    from video.video_processing import vggsound_extract_video_embeddings_batch, vggsound_batch_extract_frames_from_vids
-    from .vggsound_processing import vggsound_batch_down_trim
-    print("hallllllllllllllo")
-    # Log files path
-    
-    extract_audio_log_file = "/home/hossein/Desktop/B.sc.-project/audio/Logs_extract_audio.csv"
-    embeddings_audio_log_file = "/home/hossein/Desktop/B.sc.-project/audio/Logs_audio_embeddings.csv"
-    vid_emb_log_file = "/home/hossein/Desktop/B.sc.-project/video/Logs_video_embeddings.csv"
-
-    frames_path = r"/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/frames"
-    full_videos_path = r"/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/full_videos"
-    trimmed_videos_path = r"/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/trimmed_videos"
-    vid_emb_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/video_embeddings"
-    aud_em_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/audio_embeddings"
-    aud_path = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/audios"
-    vggsound_csv = "/home/hossein/Desktop/B.sc.-project/vggsound/vggsound.csv"
-
-
-    vggsound_batch_extract_frames_from_vids(trimmed_videos_path, frames_path)
-    vggsound_extract_video_embeddings_batch(frames_path, vid_emb_path, vid_emb_log_file )
-    vggsound_extract_audio_from_videos_batch(trimmed_videos_path, aud_path, log_file=extract_audio_log_file)
-    vggsound_extract_audio_embeddings_batch(aud_path, aud_em_path, log_file= embeddings_audio_log_file)
+    pass
 
