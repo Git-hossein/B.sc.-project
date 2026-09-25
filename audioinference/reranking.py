@@ -2,7 +2,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Optional, Union
 import os
-from .inference import convert_raw_to_nested_dict
+from .inference import convert_raw_to_nested_inference_dict
 
 
 def sync_rerank(
@@ -10,11 +10,37 @@ def sync_rerank(
     vid_query_sync_dir: str,
     audio_sync_dir_or_dict: Union[str, Dict[str, np.ndarray]],
     sync_T: float = 1.0,
-    alpha: float = 0.5,           # NEW: 0.0 = pure coarse, 1.0 = pure temporal
-    fusion_T: float = 0.1,        # NEW: low temp to sharpen fusion probabilities
+    alpha: float = 0.5,           
+    fusion_T: float = 0.1,
     return_raw: bool = True,
     batch_size: int = 16,
 ) -> Union[Dict[str, np.ndarray], Dict[str, Dict[str, Dict[str, float]]]]:
+
+    """Reranks initial coarse retrieval results using frame-level temporal audio-video alignment (using CAVMAE_SYNC embeddings).
+
+    Pre-loads candidate audio temporal embeddings, computes frame-wise similarity via 
+    diagonal summation against video query temporal embeddings, normalizes both score sets 
+    using Z-scores, fuses them via the alpha weighting parameter, and recalculates 
+    temperature-scaled softmax probabilities.
+
+    Args:
+        retrieval_results: Raw results dictionary from the initial retrieval phase containing 
+            queries, retrieved names, indices, and baseline similarity scores.
+        vid_query_sync_dir: Directory path containing temporal video query embedding .npy files.
+        audio_sync_dir_or_dict: Either a directory path of temporal audio gallery embeddings.
+        sync_T: Temperature scaling factor for the temporal softmax score computation.
+        alpha: Weighting balance between coarse retrieval (0.0) and temporal alignment (1.0).
+        fusion_T: Temperature scaling factor for the final fused score softmax computation.
+        return_raw: If True, returns the internal array-based raw dictionary; 
+            if False, converts it to a human-readable nested dictionary.
+        batch_size: Number of queries to process simultaneously during vectorized reranking.
+
+    Returns:
+        Reranked results containing updated indices, coarse scores, temporal re-ranking scores, 
+        fused scores, and their respective softmax probabilities, in either raw or nested format.
+    """
+
+    
     add_npy = lambda f: f if str(f).endswith(".npy") else f"{os.path.splitext(str(f))[0]}.npy"
     queries = retrieval_results["queries"]
     retrieved_names = retrieval_results["retrieved_names"]
@@ -56,10 +82,10 @@ def sync_rerank(
     new_retrieved_indices = np.empty((num_queries, k), dtype=np.int32)
     new_cosine_sim = np.empty((num_queries, k), dtype=np.float32)
     new_softmax_score = np.empty((num_queries, k), dtype=np.float32)
-    re_cosine_sim = np.empty((num_queries, k), dtype=np.float32)
-    re_softmax_score = np.empty((num_queries, k), dtype=np.float32)
-    fusion_score = np.empty((num_queries, k), dtype=np.float32)            # NEW
-    fusion_softmax_score = np.empty((num_queries, k), dtype=np.float32)    # NEW
+    re_cosine_sim = np.empty((num_queries, k), dtype=np.float32)           # new re-ranking score
+    re_softmax_score = np.empty((num_queries, k), dtype=np.float32)        # new reranking softmax score
+    fusion_score = np.empty((num_queries, k), dtype=np.float32)            # new fusion (rerank + coarse) score
+    fusion_softmax_score = np.empty((num_queries, k), dtype=np.float32)    # new fusion (rerank + coarse) softmax score 
 
     # -------------------------------------------------------------
     # STEP 3: Batch process queries
@@ -130,7 +156,7 @@ def sync_rerank(
         "fusion_score": np.round(fusion_score, 5),
         "fusion_softmax_score": np.round(fusion_softmax_score, 5),
     }
-    return rerank_raw_results if return_raw else convert_raw_to_nested_dict(rerank_raw_results)
+    return rerank_raw_results if return_raw else convert_raw_to_nested_inference_dict(rerank_raw_results)
 
 def slice_down_retrieval_dict(
     raw_results: Dict[str, np.ndarray],
@@ -181,7 +207,7 @@ def slice_down_retrieval_dict(
     if "fusion_score" in sliced_results:
         sliced_results["fusion_softmax_score"] = np.round(recompute_softmax(sliced_results["fusion_score"], T_values[2]), 5)
 
-    return sliced_results if return_raw else convert_raw_to_nested_dict(sliced_results)
+    return sliced_results if return_raw else convert_raw_to_nested_inference_dict(sliced_results)
 
 
 
@@ -198,6 +224,28 @@ def sync_rerank_and_slice(
         alpha:float = 0.5, 
         return_raw:bool=True
 )-> Union[Dict[str, np.ndarray], Dict[str, Dict[str, Dict[str, float]]]]:
+
+    """Reranks retrieval results with temporal alignment and slices them down to a new top-k.
+
+    Convenience wrapper that first executes `sync_rerank` to compute temporal and fused scores, 
+    then passes the results to `slice_down_retrieval_dict` to truncate the candidate list 
+    to `new_k` and recompute softmax distributions using the specified temperature values.
+
+    Args:
+        retrieval_results: Raw results dictionary from the initial retrieval phase.
+        vid_query_sync_dir: Directory path containing temporal video query embedding .npy files.
+        audio_sync_dir_or_dict: Directory path or pre-loaded dictionary of temporal audio embeddings.
+        new_k: New target number of top candidates to retain.
+        new_og_T: Temperature scaling factor for the original coarse cosine similarity softmax.
+        new_sync_T: Temperature scaling factor for the temporal alignment softmax.
+        new_fusion_T: Temperature scaling factor for the fused score softmax.
+        alpha: Weighting balance between coarse retrieval (0.0) and temporal alignment (1.0).
+        return_raw: If True, returns the internal array-based raw dictionary; 
+            if False, converts it to a human-readable nested dictionary.
+
+    Returns:
+        Reranked and sliced results in either raw array format or nested dictionary format.
+    """
 
     reranked = sync_rerank(
         retrieval_results=retrieval_results, 
@@ -292,20 +340,18 @@ def sweep_alpha_offline(
     coarse_results: Dict[str, np.ndarray],
     reranked_results: Dict[str, np.ndarray],
     alphas: list[float] = [0.0, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0],
-    ground_truth_map: Optional[Dict[str, str]] = None,
 ):
-    # FIX: Pull ALL arrays from reranked_results so they are perfectly aligned to the same candidate order
+
     cand_indices = reranked_results["retrieved_indices"]
     orig_sim = reranked_results["cosine_sim"]
     sync_sim = reranked_results["re_cosine_sim"]
 
-    # Compute Z-scores once (shape: Q, K). Mean/Std are permutation invariant!
+    # Compute Z-scores (only once)
     z_c = (orig_sim - orig_sim.mean(axis=-1, keepdims=True)) / (orig_sim.std(axis=-1, keepdims=True) + 1e-6)
     z_s = (sync_sim - sync_sim.mean(axis=-1, keepdims=True)) / (sync_sim.std(axis=-1, keepdims=True) + 1e-6)
 
     row_idx = np.arange(len(cand_indices))[:, np.newaxis]
     
-    # Template dict for re-using evaluate_reranking and evaluate_retrieval_metrics
     eval_dict = {
         "queries": coarse_results["queries"],
         "retrieved_names": coarse_results["retrieved_names"],
@@ -336,8 +382,7 @@ def sweep_alpha_offline(
 
         # 4. Evaluate
         metrics = evaluate_retrieval_metrics(eval_dict)
-        # We still compare against coarse_results to get the true eviction rate!
-        dynamics = evaluate_reranking(coarse_results, eval_dict)
+        rerank_specific_metrics = evaluate_reranking(coarse_results, eval_dict)
 
         print(
             f"{a:<8.2f} | "
@@ -346,45 +391,11 @@ def sweep_alpha_offline(
             f"{metrics['R@10']:<14.2f} | "
             f"{metrics['MedR']:<16.2f} | "
             f"{metrics['MRR']:<18.2f} | "
-            f"{dynamics['net_top1_gain_pct %']:<20.2f} | "
-            f"{dynamics['eviction_rate_pct %']:<22.2f}"
+            f"{rerank_specific_metrics['net_top1_gain_pct %']:<20.2f} | "
+            f"{rerank_specific_metrics['eviction_rate_pct %']:<22.2f}"
         )
 
 
 if __name__ == "__main__":
-    from path_settings import paths_config
-    from audioinference.inference import infer_similar_audio_ultra_fast_ultimate, load_all_normed_embeddings
-    from audioinference.evaluation import evaluate_retrieval_metrics
-    import pprint 
-
-    print("RERANKING but with clip wav2clip")
-
-    my_queries = os.listdir(paths_config.validation.video_embeddings)[:5]
-    myinfer = infer_similar_audio_ultra_fast_ultimate(
-        query_lst= ['Y-qOOR0izlE'], 
-        query_dir= paths_config.test.cav_mae_video_clip,
-        all_emb_dict= load_all_normed_embeddings(paths_config.training.cav_mae_audio),
-        top_k= 50,
-        random_sample = False,
-        random_sample_count = 1,
-        temp= 0.01,
-        return_raw = True
-)
-
-    # pprint.pprint(convert_raw_to_nested_dict(myinfer), sort_dicts=False)
-    # pprint.pp(evaluate_retrieval_metrics(myinfer))
-    print("\n\n\n rerank:\n")
-
-    renranked = sync_rerank_and_slice(
-        retrieval_results = myinfer, 
-        vid_query_sync_dir= paths_config.test.cav_mae_sync_video, 
-        audio_sync_dir_or_dict =paths_config.training.cav_mae_sync_audio, 
-        new_k= 1,
-        new_og_T=0.01,
-        new_sync_T=0.01,
-        new_fusion_T=0.3,
-        alpha = 0.6,
-        return_raw = False)
-
-    pprint.pp(renranked, sort_dicts=False)
+    pass
 

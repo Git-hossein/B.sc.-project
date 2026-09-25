@@ -18,15 +18,15 @@ from typing import Optional, Any, Dict
 
 
 
-
-# Create separate folders for full and trimmed clips
-full_videos_path = paths_config.training.full_videos
-trimmed_videos_path = paths_config.training.trimmed_videos
-video_frames_path = paths_config.training.frames
-audios_path = paths_config.training.audios
-audio_embeddings_path = paths_config.training.audio_embeddings
-video_embeddings_path = paths_config.training.video_embeddings
-inferred_example_path = paths_config.inferred_example_path
+# Legacy code: TODO either make function of out these or remove them
+# # Create separate folders for full and trimmed clips
+# full_videos_path = paths_config.training.full_videos
+# trimmed_videos_path = paths_config.training.trimmed_videos
+# video_frames_path = paths_config.training.frames
+# audios_path = paths_config.training.audios
+# audio_embeddings_path = paths_config.training.audio_embeddings
+# video_embeddings_path = paths_config.training.video_embeddings
+# inferred_example_path = paths_config.inferred_example_path
 # os.makedirs(full_videos_path, exist_ok=True)
 # os.makedirs(trimmed_videos_path, exist_ok=True)
 # os.makedirs(audios_path, exist_ok=True)
@@ -34,13 +34,13 @@ inferred_example_path = paths_config.inferred_example_path
 # os.makedirs(video_embeddings_path, exist_ok=True)
 # os.makedirs(inferred_example_path, exist_ok=True)
 
-# Log files path
-download_and_trim_log_file = paths_config.training.down_trim_log
-extract_audio_log_file = paths_config.training.audio_log
-embeddings_audio_log_file = paths_config.training.audio_emb_log
-video_embeddings_log_file = paths_config.training.video_emb_log
+# # Log files path
+# download_and_trim_log_file = paths_config.training.down_trim_log
+# extract_audio_log_file = paths_config.training.audio_log
+# embeddings_audio_log_file = paths_config.training.audio_emb_log
+# video_embeddings_log_file = paths_config.training.video_emb_log
 
-# Create log file with headers if it doesn't exist
+# # Create log file with headers if it doesn't exist
 # if not os.path.exists(download_and_trim_log_file):
 #     with open(download_and_trim_log_file, mode='w', newline='', encoding='utf-8') as f:
 #         writer = csv.writer(f)
@@ -95,30 +95,29 @@ def load_all_normed_embeddings(embeddings_dir:str, names: Optional[list[str]] = 
 
 
 
-def find_top_k_similar_ultra_fast_ultimate(
+def find_top_k_similar(
         query_embs: np.ndarray, 
         all_emb_dict: Optional[dict[str, np.ndarray]]= None, 
         embeddings_dir: str = "path/to/embeddings", 
-        k: int = 5, 
+        top_k: int = 5, 
         T: float = 1.0):
-    """
-    Docstring for find_top_k_similar_ultra_fast_ultimate
-    
-    :param query_embs: Description
-    :type query_embs: np.ndarray
-    :param all_emb_dict: Description
-    :type all_emb_dict: Optional[dict[str, np.ndarray]]
-    :param embeddings_dir: Description
-    :type embeddings_dir: str
-    :param k: Description
-    :type k: int
-    :param T: Description
-    :type T: float
-    :return: Description
-    :rtype: Any
+    """Computes batched cosine similarities between query embeddings and an audio gallery.
+
+    Returns the top-k matches along with temperature-scaled softmax scores.
+
+    Args:
+        query_embs: 2D array of query embeddings of shape (Q, D).
+        all_emb_dict: Pre-loaded dictionary mapping audio filenames to normalized embeddings. 
+            If None, embeddings are automatically loaded from `embeddings_dir`.
+        embeddings_dir: Path to load audio embeddings from if `all_emb_dict` is None.
+        top_k: Number of top similar audio documents to retrieve per query.
+        T: Temperature scaling factor for the softmax probability computation.
+
+    Returns:
+        A raw results dictionary containing retrieved filenames, indices, cosine similarities, 
+        and softmax scores as NumPy arrays.
     """
 
-    # 1. Fallback Loading Logic
     if all_emb_dict is None:
 
         all_emb_dict = load_all_normed_embeddings(embeddings_dir)
@@ -127,41 +126,37 @@ def find_top_k_similar_ultra_fast_ultimate(
     ALL_AUDIO_EMBS = np.array(list(all_emb_dict.values()))
     
 
-    # 2. Ensure query is 2D (Matrix)
-    # If a single query is passed (1D), convert it to (1, D)
+    # If a single query is passed (1D list), convert it to (1, D) as we always need a 2Dmatrix
     if query_embs.ndim == 1:
         query_embs = query_embs[np.newaxis, :]
 
-    # 3. Vectorized Normalization (per row)
+    # 1. Vectorized Normalization (per row/query)
     q_norms = np.linalg.norm(query_embs, axis=1, keepdims=True)
     query_ready = query_embs / (q_norms + 1e-9)
     
-    # 4. BATCH MATRIX OPERATION
+    # 2. BATCH MATRIX OPERATION
     # (Q, D) @ (D, N) -> (Q, N) Matrix of all similarities
     all_similarities = query_ready @ ALL_AUDIO_EMBS.T
     
-    # 5. Process results for each query
+    # 3. Process results for each query
     num_queries = all_similarities.shape[0]
     num_docs = all_similarities.shape[1]
-    current_k = min(k, num_docs)
+    top_k = min(top_k, num_docs)
   
     batch_results_raw = {'retrieved_names': np.array(AUDIO_FILENAMES),
-                        'retrieved_indices': np.empty((num_queries, current_k), dtype=np.int32), 
-                        'cosine_sim': np.empty((num_queries, current_k), dtype=np.float32), 
-                        'softmax_score': np.empty((num_queries, current_k), dtype=np.float32)}
+                        'retrieved_indices': np.empty((num_queries, top_k), dtype=np.int32), 
+                        'cosine_sim': np.empty((num_queries, top_k), dtype=np.float32), 
+                        'softmax_score': np.empty((num_queries, top_k), dtype=np.float32)}
 
 
-    
-    # Use a loop for the Top-K/Softmax part (this is O(Q), which is very fast)
-    # The heavy lifting O(Q*N) was already done in the matrix multiplication above.
     for i in range(num_queries):
         similarities = all_similarities[i]
         
-        # Top K Logic
-        if current_k >= num_docs * 0.2:
-            top_indices = np.argsort(similarities)[::-1][:current_k]
+        # perform partial sort if top k isn't too big, otherwise just sort everything (simple speedup trick)
+        if top_k >= num_docs * 0.2:
+            top_indices = np.argsort(similarities)[::-1][:top_k]
         else:
-            idx = np.argpartition(similarities, -current_k)[-current_k:]
+            idx = np.argpartition(similarities, -top_k)[-top_k:]
             top_indices = idx[np.argsort(similarities[idx])][::-1]
         
         top_scores = similarities[top_indices]
@@ -182,7 +177,7 @@ def find_top_k_similar_ultra_fast_ultimate(
 
 
 
-def convert_raw_to_nested_dict(
+def convert_raw_to_nested_inference_dict(
     raw_results: Dict[str, np.ndarray]
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """
@@ -241,134 +236,48 @@ def convert_raw_to_nested_dict(
     return nested_results
 
 
-# # legacy code
-# def find_top_k_similar_ultra_fast_ultimate_legacy(
-#         query_embs: np.ndarray, 
-#         all_emb_dict: Optional[dict[str, np.ndarray]]= None, 
-#         embeddings_dir: str = "path/to/embeddings", 
-#         k: int = 5, 
-#         T: float = 1.0,
-#         return_raw= False):
-#     """
-#     Docstring for find_top_k_similar_ultra_fast_ultimate
-    
-#     :param query_embs: Description
-#     :type query_embs: np.ndarray
-#     :param all_emb_dict: Description
-#     :type all_emb_dict: Optional[dict[str, np.ndarray]]
-#     :param embeddings_dir: Description
-#     :type embeddings_dir: str
-#     :param k: Description
-#     :type k: int
-#     :param T: Description
-#     :type T: float
-#     :return: Description
-#     :rtype: Any
-#     """
-
-#     # 1. Fallback Loading Logic
-#     if all_emb_dict is None:
-
-#         all_emb_dict = load_all_normed_embeddings(embeddings_dir)
-
-#     AUDIO_FILENAMES = list(all_emb_dict.keys())
-#     ALL_AUDIO_EMBS = np.array(list(all_emb_dict.values()))
-    
-
-#     # 2. Ensure query is 2D (Matrix)
-#     # If a single query is passed (1D), convert it to (1, D)
-#     if query_embs.ndim == 1:
-#         query_embs = query_embs[np.newaxis, :]
-
-#     # 3. Vectorized Normalization (per row)
-#     q_norms = np.linalg.norm(query_embs, axis=1, keepdims=True)
-#     query_ready = query_embs / (q_norms + 1e-9)
-    
-#     # 4. BATCH MATRIX OPERATION
-#     # (Q, D) @ (D, N) -> (Q, N) Matrix of all similarities
-#     all_similarities = query_ready @ ALL_AUDIO_EMBS.T
-    
-#     # 5. Process results for each query
-#     batch_results = []
-#     num_queries = all_similarities.shape[0]
-#     num_docs = all_similarities.shape[1]
-    
-#     # Use a loop for the Top-K/Softmax part (this is O(Q), which is very fast)
-#     # The heavy lifting O(Q*N) was already done in the matrix multiplication above.
-#     for i in range(num_queries):
-#         similarities = all_similarities[i]
-        
-#         # Top K Logic
-#         current_k = min(k, num_docs)
-#         if current_k >= num_docs * 0.2:
-#             top_indices = np.argsort(similarities)[::-1][:current_k]
-#         else:
-#             idx = np.argpartition(similarities, -current_k)[-current_k:]
-#             top_indices = idx[np.argsort(similarities[idx])][::-1]
-        
-#         top_scores = similarities[top_indices]
-#         top_files = [AUDIO_FILENAMES[j] for j in top_indices]
-        
-#         # Softmax on top K
-#         scores_shifted = top_scores / T
-#         exps = np.exp(scores_shifted - np.max(scores_shifted))
-#         softmax_probs = (exps / np.sum(exps)).tolist()
-        
-#         query_results = []
-
-#         for filename, prob, cosine in zip(top_files, softmax_probs, top_scores):
-#             query_results.append({
-#                 "filename": filename,
-#                 "softmax_score": float(prob),
-#                 "cosine_sim": float(cosine)})
-
-#         batch_results.append(query_results)
-    
-#     # Return a single list if only one query was provided, else the whole batch
-#     return batch_results
-
-
-
-
-
-def infer_similar_audio_ultra_fast_ultimate(
+def infer_similar_audio(
         query_lst: list[str] | None = None, 
         query_dir = paths_config.training.video_embeddings,
-        all_emb_dict: Optional[dict[str, np.ndarray]]= None, 
+        all_emb_dict: dict[str, np.ndarray]=load_all_normed_embeddings(paths_config.training.audio_embeddings), 
         top_k: int = 5, 
         random_sample: bool = False, 
         random_sample_count: int = 1, 
         temp: float = 1.0,
         return_raw:bool=False
     ):
-    """
-    Docstring for infer_similar_audio_ultra_fast_ultimate
-    
-    :param query_lst: Description
-    :type query_lst: list[str] | None
-    :param all_emb_dict: Description
-    :type all_emb_dict: Optional[dict[str, np.ndarray]]
-    :param top_k: Description
-    :type top_k: int
-    :param random_sample: Description
-    :type random_sample: bool
-    :param random_sample_count: Description
-    :type random_sample_count: int
-    :param temp: Description
-    :type temp: float
+    """Performs audio retrieval inference for video queries.
+
+    Supports either evaluating a specific list of video query paths/names or randomly 
+    sampling video queries from a directory.
+
+    Args:
+        query_lst: List of video query filenames or paths to evaluate. Required if `random_sample` is False. The queries may or may not include the 
+        '.npy' extention in their names
+        query_dir: Directory path containing the pre-computed video embedding .npy files.
+        all_emb_dict: Dictionary of pre-loaded and normalized audio gallery embeddings.
+        top_k: Number of top similar audio tracks to retrieve per video query.
+        random_sample: If True, bypasses `query_lst` and randomly samples queries from `query_dir`.
+        random_sample_count: Number of random video queries to sample if `random_sample` is True.
+        temp: Temperature scaling parameter passed to softmax score calculations.
+        return_raw: If True, returns the internal array-based raw dictionary; 
+            if False, converts it to a human-readable nested dictionary.
+
+    Returns:
+        Retrieval results either in raw array format or nested dictionary format.
     """
 
     video_embeddings_dir = query_dir
     
-    # 1. Ensure we have the audio embeddings loaded
-    if all_emb_dict is None:
-        print("Embeddings is None. Loading audio embeddings manually...")
-        all_emb_dict = load_all_normed_embeddings(audio_embeddings_path)
+    # 1. ensure all_emb_dict is an actual dict
+    if not isinstance(all_emb_dict, dict):
+        raise Exception("Please make sure that the audio gallery is provided as normalized dictionary of embeddings")
+        
 
     query_matrix = []
     final_keys = []
 
-    # --- MODE A: SPECIFIC QUERIES ---
+    # --- MODE A: SPECIFIC QUERIES(the queries are specified) ---
     if not random_sample:
         if not query_lst:
             raise ValueError("query_lst must be provided when random_sample is False.")
@@ -384,7 +293,7 @@ def infer_similar_audio_ultra_fast_ultimate(
             query_matrix.append(emb)
             final_keys.append(os.path.basename(path))
 
-    # --- MODE B: RANDOM SAMPLES ---
+    # --- MODE B: RANDOM SAMPLES(random sample is turned on) ---
     else:
         all_video_files = [f for f in os.listdir(video_embeddings_dir) if f.endswith(".npy")]
         if not all_video_files:
@@ -400,22 +309,22 @@ def infer_similar_audio_ultra_fast_ultimate(
     if not query_matrix:
         return {}
 
-    # 2. Convert to 2D Matrix (N, Dimension)
+    # 2. convert to numpy array (matrix)
     query_matrix = np.array(query_matrix)
 
 
-    top_similars_batch = find_top_k_similar_ultra_fast_ultimate(
+    top_similars_batch = find_top_k_similar(
         query_matrix, 
         all_emb_dict, 
-        k=top_k, 
+        top_k=top_k, 
         T=temp
     )
     top_similars_batch["queries"]=np.array(final_keys)
-    return top_similars_batch if return_raw else convert_raw_to_nested_dict(top_similars_batch)
+    return top_similars_batch if return_raw else convert_raw_to_nested_inference_dict(top_similars_batch)
 
 
 
-def create_inference_example_ultimate(inference_dict, inference_dir = inferred_example_path, query_videos_dir = trimmed_videos_path):
+def create_inference_structured_folder(inference_dict: dict, inference_dir: str, query_videos_dir: str, audio_matches_dir: str):
     """
     Given a dictionary returned by `infer_similar_audio` and destination directory, creates a folder structure
     with trimmed videos and matched audio files for easy viewing.
@@ -431,7 +340,8 @@ def create_inference_example_ultimate(inference_dict, inference_dir = inferred_e
     Args:
         inference_dict (dict): output of `infer_similar_audio`
         inference_dir (str): path to create inference examples in
-        query_videos_dir: where to look for the actual mp4 files of the video queries
+        query_videos_dir (str): where to look for the actual mp4 files of the video queries
+        audio_matches_dir (str): where to look for the audio matches found for each video query
     """
     for video_key, audio_matches in inference_dict.items():
 
@@ -459,9 +369,8 @@ def create_inference_example_ultimate(inference_dict, inference_dir = inferred_e
 
         # Copy matched audio files
         for index, audio_file in enumerate(audio_matches.keys(), start=1):
-            # Remove .npy if present to get actual wav filename
             base_audio_name = os.path.splitext(audio_file)[0]
-            audio_source = os.path.join(audios_path, f"{base_audio_name}.wav")
+            audio_source = os.path.join(audio_matches_dir, f"{base_audio_name}.wav")
             ranked_filename = f"{base_audio_name}_rank{index}.wav"
             dest_path = os.path.join(video_folder, ranked_filename)
 
@@ -475,56 +384,4 @@ def create_inference_example_ultimate(inference_dict, inference_dir = inferred_e
 
 
 if __name__ == "__main__":
-    TRAIN_DIR = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/cav_mae/video_embeddings/10FrameClipLevel"
-    VAL_DIR = "/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/test/cav_mae/video_embeddings/10FrameClipLevel"
-    ALL_EMBS_FILES_TUPLE = load_all_normed_embeddings("/media/hossein/H.s.wildwildwest/Bsc.Thesis_Datasets/vggsound/training/cav_mae/audio_embeddings")
-    val_query = os.listdir(paths_config.training.cav_mae_video_clip)[:5]
-    print("our val queries: ", val_query)
-    print("\n\n RAW DICT: \n\n\n")
-    raw = infer_similar_audio_ultra_fast_ultimate(val_query, TRAIN_DIR, ALL_EMBS_FILES_TUPLE, 3, random_sample=False, random_sample_count= 2,
-                                            temp = 0.01, return_raw=True)
-    pprint.pp(raw, sort_dicts=False)
-    print("\n\n JSON DICT: \n\n\n")
-    unraw = infer_similar_audio_ultra_fast_ultimate(val_query, TRAIN_DIR, ALL_EMBS_FILES_TUPLE, 3, random_sample=False, random_sample_count= 2,
-                                            temp = 0.01, return_raw=False)
-    pprint.pp(unraw, sort_dicts=False)
-    print("\n\n CONVERTED TO JSON DICT: \n\n\n")
-    converted = convert_raw_to_nested_dict(raw)
-    pprint.pp(converted, sort_dicts=False)
-
-
-    print(converted == unraw)
-    # test_vids = [vid for vid in os.listdir(paths_config.test_video_embeddings_path)]
-    # my_dict = infer_similar_audio_ultra_fast_ultimate(test_vids[:3], paths_config.test_video_embeddings_path, ALL_EMBS_FILES_TUPLE, 3, False, 1, 0.01)
-    # pprint.pp()
-
-    # options = {
-    #         "cfg_coef": 0.0,
-    #         "prompt_duration": 5,
-    #         "num_audio_mix": 3,
-    #         "with_text_descr": False,
-    #         "weight_by": "softmax_score"
-    #     }
-
-    # run_parallel_tcml_pipeline_continuation(inferred_dict= my_dict, 
-    #                            local_down_dst= "/home/hossein/Desktop/B.sc.-project/generated_examples_4.4/", 
-    #                            timeout_minutes= 8*60,
-    #                            num_GPU=40,
-    #                            options= options,
-    #                            auto_download=False)
-    
-    # sessionID = "20260419_214859_002809"
-                
-
-    # if wait_for_job_completion(sessionID, 40, 60):
-    #     download_parallel_results(
-    #                 session_id=sessionID, 
-    #                 local_down_dest="/home/hossein/Desktop/B.sc.-project/generated_examples/", 
-    #                 total_videos=len(my_dict))
-    # from generation_server import wait_for_job_completion, download_parallel_results_zipped
-        
-    # if wait_for_job_completion(sessionID, 40, 60):
-    #     download_parallel_results_zipped(
-    #                 session_id=sessionID, 
-    #                 local_down_dest="/home/hossein/Desktop/B.sc.-project/generated_examples_4.3/", 
-    #                 total_videos=len(my_dict))
+    pass

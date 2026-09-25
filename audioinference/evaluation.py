@@ -32,17 +32,16 @@ def evaluate_retrieval_metrics(
 
     num_queries, total_k = retrieved_indices.shape
 
-    # 1. Map audio filenames to their matrix column indices for O(1) lookup
+    # 1. map audio filenames to their matrix column indices for super fast lookup
     name_to_idx = {name: idx for idx, name in enumerate(retrieved_names)}
     stem_to_idx = {os.path.splitext(name)[0]: idx for idx, name in enumerate(retrieved_names)}
 
-    # 2. Extract 1-based ranks of the true target for each query
+    # 2. extract ranks of the true GT for each query
     ranks = []
 
     for i, q in enumerate(queries):
         q_stem = os.path.splitext(q)[0]
 
-        # Determine single target audio index
         if ground_truth_map is not None:
             target = ground_truth_map.get(q, ground_truth_map.get(q_stem))
             if target is None:
@@ -50,7 +49,7 @@ def evaluate_retrieval_metrics(
             target_stem = os.path.splitext(target)[0]
             target_idx = stem_to_idx.get(target_stem)
         else:
-            # Default: query video stem == ground truth audio stem
+            # honestly this is always the case, TODO maybe remove the if case?
             target_idx = stem_to_idx.get(q_stem)
 
         if target_idx is None:
@@ -59,14 +58,11 @@ def evaluate_retrieval_metrics(
                 f"was not found in the retrieved audio pool (`retrieved_names`)."
             )
 
-        # Check where target appears in top-K retrieved indices
         matched_positions = np.where(retrieved_indices[i] == target_idx)[0]
 
         if len(matched_positions) > 0:
-            # 1-based rank of the best-ranked positive candidate
             ranks.append(matched_positions[0] + 1)
         else:
-            # Target fell outside the retrieved top-K
             ranks.append(np.inf)
 
     ranks = np.array(ranks)
@@ -75,21 +71,21 @@ def evaluate_retrieval_metrics(
     if total_evaluated == 0:
         return {}
 
-    # 3. Compute Metrics
+    # 3. calculate metrics
     metrics = {}
 
     for k in recall_k_vals:
         recall = float(np.mean(ranks <= k) * 100.0)
         metrics[f"R@{k}"] = round(recall, 4)
 
-    # Median Rank & Mean Rank (calculated over valid ranks)
+    # Median Rank & Mean Rank
     finite_ranks = ranks[np.isfinite(ranks)]
     median_rank = float(np.median(ranks)) if len(finite_ranks) == total_evaluated else float(np.median(ranks))
     metrics["MedR"] = round(median_rank, 4)
     mean_rank = float(np.mean(finite_ranks)) if len(finite_ranks) > 0 else np.nan
     metrics["MeanRank"] = round(mean_rank, 4)
 
-    # Mean Reciprocal Rank: 1 / rank if within top-K, else 0.0
+    # Mean Reciprocal Rank (MRR)
     reciprocal_ranks = np.where(np.isfinite(ranks), 1.0 / ranks, 0.0)
     mean_reciprocal_ranks = float(np.mean(reciprocal_ranks))
     metrics["MRR"] = round(mean_reciprocal_ranks , 4)
@@ -97,15 +93,5 @@ def evaluate_retrieval_metrics(
     return metrics
 
 if __name__ == "__main__":
-    
-    import os
-    VAL_VID_DIR = ...
-    VAL_AUDIO_DIR = ...
-    TRAIN_AUDIO_DIR = paths_config.training.cav_mae_audio
-    TRAIN_VID_DIR = paths_config.training.cav_mae_video_clip
-    # inf_lst = infer_similar_audio_ultra_fast_ultimate(os.listdir(TRAIN_VID_DIR), TRAIN_VID_DIR, load_all_normed_embeddings(TRAIN_AUDIO_DIR), 1000, temp=0.01)
-    inf_lst_raw = infer_similar_audio_ultra_fast_ultimate(os.listdir(TRAIN_VID_DIR), TRAIN_VID_DIR, load_all_normed_embeddings(TRAIN_AUDIO_DIR), 1000, temp=0.01, return_raw=True)
-    print('done')
-    # pprint.pp(evaluate_audio_rag_NEW(inf_lst, "train", retrieved_embs= retrieved_embs, gt_embs= gt_embs), sort_dicts=False)
-    pprint.pp(evaluate_retrieval_metrics(inf_lst_raw), sort_dicts=False)
+    pass
     
