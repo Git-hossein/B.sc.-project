@@ -1,5 +1,5 @@
 import numpy as np
-from .inference import load_all_normed_embeddings, infer_similar_audio_ultra_fast_ultimate
+from .inference import load_all_normed_embeddings, infer_similar_audio
 from path_settings import paths_config
 from typing import Dict
 import pprint
