@@ -143,7 +143,7 @@ def wait_for_job_completion(sentinel_base_dir, session_id, port, num_chunks, tim
 
 
 
-def run_parallel_tcml_pipeline_audioldm2_generation(
+def run_parallel_tcml_pipeline_audioldm2_pure_generation(
     video_list, 
     local_down_dst, 
     timeout_minutes, 
