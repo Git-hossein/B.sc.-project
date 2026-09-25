@@ -25,13 +25,12 @@ def vggsound_training_videos_generator(
         yielded = 0
         for row in reader:
             if row[3].strip() != type:
-                continue  # skip non-training rows
+                continue  
 
-            # Skip first `start` items
             if skipped < start:
                 skipped += 1
                 continue
-            # Stop once we yield nmany items
+
             if yielded >= nmany:
                 break
 
@@ -49,11 +48,9 @@ def download_youtube_video(video_id, output_path):
             'outtmpl': output_path,
             'cookiesfrombrowser': ('firefox',),
             'retries': 10,
-            
-            # --- ADD THESE FOR THE 1,000 VIDEO BATCH ---
-            'fragment_retries': 10,      # If a single chunk of video drops, it retries that chunk
-            'continuedl': True,          # If internet cuts, it picks up where it left off
-            'quiet': False,              # Keeps you informed of progress
+            'fragment_retries': 10,      
+            'continuedl': True,          
+            'quiet': False,              
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -120,11 +117,9 @@ def vggsound_batch_down_trim(video_list, full_videos_path, trimmed_videos_path, 
         dl_success = False
         trim_success = False
 
-        # Download full video
         print("start downloading and trimming video ")
         dl_success = download_youtube_video(video_id, full_file)
 
-        # Trim video
         if dl_success:
             trim_success = trim_video(full_file, trim_file, start_sec, clip_length)
 
@@ -136,84 +131,3 @@ def vggsound_batch_down_trim(video_list, full_videos_path, trimmed_videos_path, 
                                 "success" if dl_success else "failed",
                                 "success" if trim_success else "unknown" if not dl_success else "failed"])
                 
-
-
-def check_single_file(vid_path):
-    """Worker function to check one file."""
-    try:
-        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(vid_path)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        if result.returncode != 0:
-            return vid_path.name
-    except Exception:
-        return vid_path.name
-    return None
-
-def check_integrity(full_dir= paths_config.training_full_videos_path, trimmed_dir= paths_config.training_trimmed_videos_path):
-    print("🚀 Starting the integrity check...")
-    full_path = Path(full_dir)
-    trimmed_path = Path(trimmed_dir)
-
-    valid_full = {}
-    valid_trimmed = {}
-    invalid_naming_full = []
-    invalid_naming_trimmed = []
-
-    # --- 1. SCAN FOLDERS (This part is very fast) ---
-    for f in full_path.iterdir():
-        if f.is_file():
-            if f.name.endswith('_full.mp4'):
-                valid_full[f.name.replace('_full.mp4', '')] = f
-            else:
-                invalid_naming_full.append(f.name)
-
-    for f in trimmed_path.iterdir():
-        if f.is_file():
-            if f.name.endswith('.mp4') and not f.name.endswith('_full.mp4'):
-                valid_trimmed[f.name.replace('.mp4', '')] = f
-            else:
-                invalid_naming_trimmed.append(f.name)
-
-    # --- 2. PRINT SYNC REPORT ---
-    full_ids = set(valid_full.keys())
-    trimmed_ids = set(valid_trimmed.keys())
-    missing_from_trimmed = full_ids - trimmed_ids
-    missing_from_full = trimmed_ids - full_ids
-
-    print("\n" + "="*50)
-    print(f"📊 DATASET SYNC: Full Folder ({len(full_ids)}) | Trimmed Folder ({len(trimmed_ids)})")
-    print("="*50)
-
-    if missing_from_trimmed:
-        print(f"⚠️  MISSING IN TRIMMED ({len(missing_from_trimmed)} IDs) : \n{print(missing_from_trimmed)}")
-    if missing_from_full:
-        print(f"⚠️  MISSING IN FULL ({len(missing_from_full)} IDs) : \n{print(missing_from_full)}")
-
-    if invalid_naming_full or invalid_naming_trimmed:
-        print(f"🚫 INVALID NAMES: Full ({len(invalid_naming_full)}) | Trimmed ({len(invalid_naming_trimmed)})")
-
-    # --- 3. THE TURBO HEALTH CHECK (ffprobe) ---
-    print("\n" + "-"*50)
-    print("🛠️  CORRUPTION CHECK (Parallel ffprobe)")
-    print("-" * 50)
-    
-    all_files = list(valid_full.values()) + list(valid_trimmed.values())
-    total_files = len(all_files)
-    corrupted = []
-    
-    print(f"Checking {total_files} files using 16 CPU threads...")
-
-    # We use 16 workers to check 16 files at once
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        # We wrap the results in a list to wait for them to finish
-        results = list(executor.map(check_single_file, all_files))
-        
-    # Filter out the None results (healthy files) to get the corrupted names
-    corrupted = [name for name in results if name is not None]
-
-    if corrupted:
-        print(f"❌ Found {len(corrupted)} unreadable files!")
-        for c in corrupted:
-            print(f"   - {c}")
-    else:
-        print("✅ All video headers are healthy.")
